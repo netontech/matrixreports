@@ -45,21 +45,37 @@ is arithmetically wrong.
 pip install -e .                      # add [sqlserver], [mysql] or [postgres]
 ```
 
+Run it on a machine that can reach the Matrix SQL Server.
+[`docs/running-on-premise.md`](docs/running-on-premise.md) covers the Windows
+setup end to end: ODBC driver, a read-only login, scheduling and troubleshooting.
+
 ## Configure
 
 ```bash
 cp config/matrixreports.example.yaml config/matrixreports.yaml
 ```
 
-Edit the `database` and `schema` sections so the table and column names match
-the Matrix database. That mapping is the only installation-specific part;
-[`docs/schema-mapping.md`](docs/schema-mapping.md) shows how to find the right
-names in the SQL dump, including how to tell the raw punch log apart from the
-pre-flattened summary table that causes the six-punch limit in the first place.
+Fill in the `database` block, then let the tool work out the schema for itself:
+
+```bash
+matrixreports discover --write config/discovered.yaml
+```
+
+`discover` reads the database catalogue, scores every table for how well it fits
+each role, samples the direction column so `IN` and `OUT` can be mapped, and
+writes a draft config annotated with what it found and why. It also reports any
+**pre-flattened summary table** — one with `IN1, OUT1, IN2, OUT2 …` columns,
+which can hold only as many punches as it has column pairs. That is where a fixed
+in/out ceiling comes from, and such tables are never selected as a source.
+
+Review the draft before using it — particularly `direction_in` / `direction_out`,
+since reversing those turns time at work into time out.
+[`docs/schema-mapping.md`](docs/schema-mapping.md) covers mapping by hand if
+discovery cannot work something out.
 
 ## Use
 
-Start with `check`, which proves the point on real data:
+Then `check`, which confirms the mapping and proves the point on real data:
 
 ```console
 $ matrixreports check --from 2026-06-01 --to 2026-06-30
@@ -145,6 +161,7 @@ src/matrixreports/
   model.py        Employee, Punch, Interval, DayRecord
   pairing.py      punches -> unlimited sessions and breaks
   datasource.py   SQL / CSV / in-memory sources
+  discover.py     works out the schema by inspecting the catalogue
   builder.py      day records for a whole period
   reports/        daily, summary, weekly, monthly, yearly
   excel.py        .xlsx and .csv output

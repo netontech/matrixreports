@@ -15,6 +15,18 @@ live in `config/matrixreports.yaml` rather than in code. The example config
 ships with placeholder names in the shape COSEC commonly uses — treat them as a
 starting point to verify, not as correct.
 
+## Start with `discover`
+
+Before mapping anything by hand, try:
+
+```bash
+matrixreports discover --write config/discovered.yaml
+```
+
+It inspects the database catalogue and writes a draft mapping, including a
+warning for any pre-flattened summary table it finds. The rest of this document
+covers doing it manually, and what to check in the draft.
+
 ## Finding the right tables in the SQL dump
 
 If you have the `.sql` dump or a connection to the server, these queries find the

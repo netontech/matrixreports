@@ -1,5 +1,6 @@
 """Command line interface.
 
+    matrixreports discover --config config.yaml   # writes a draft schema mapping
     matrixreports check    --config config.yaml
     matrixreports daily    --date 2026-06-01
     matrixreports summary  --date 2026-06-01
@@ -22,7 +23,8 @@ from pathlib import Path
 
 from .builder import AttendanceBuilder
 from .config import Config
-from .datasource import open_source
+from .datasource import SqlPunchSource, open_source
+from .discover import discover, format_report, render_config
 from .duration import hhmm
 from .excel import write_csv, write_csvs, write_workbook
 from .reports import (
@@ -69,6 +71,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    discover_parser = subparsers.add_parser(
+        "discover",
+        help="inspect the database and write a draft schema mapping",
+    )
+    discover_parser.add_argument(
+        "--write", metavar="PATH",
+        help="write the draft config to PATH (default: print to stdout)",
+    )
+    discover_parser.add_argument(
+        "--no-sample", action="store_true",
+        help="do not read sample values from the direction column",
+    )
+
     check = subparsers.add_parser("check", help="verify connectivity and show punch depth")
     check.add_argument("--from", dest="start", type=_parse_date, required=True)
     check.add_argument("--to", dest="end", type=_parse_date)
@@ -105,6 +120,72 @@ def _load_config(path: str) -> Config:
         )
         raise SystemExit(2)
     return Config.load(config_path)
+
+
+def _run_discover(config: Config, args: argparse.Namespace) -> int:
+    """Inspect the catalogue and emit a draft mapping.
+
+    Runs before any schema mapping exists, so it talks to the connection
+    directly rather than going through the punch source.
+    """
+    if args.csv_extract:
+        print("discover needs a database connection; it cannot inspect a CSV.",
+              file=sys.stderr)
+        return 2
+    try:
+        source = SqlPunchSource.__new__(SqlPunchSource)
+        source.config = config
+        source.driver = (config.database.driver or "sqlite").lower()
+        connection = source._connect(config.database)
+    except Exception as exc:                     # noqa: BLE001 - surfaced to the user
+        print(f"could not connect: {exc}\n\n"
+              "Check the `database` section of your config; see "
+              "docs/running-on-premise.md for connection strings.",
+              file=sys.stderr)
+        return 2
+
+    try:
+        result = discover(connection, source.driver,
+                          sample_directions=not args.no_sample)
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            pass
+
+    print(format_report(result), file=sys.stderr)
+
+    if not result.best("punches") or not result.best("employees"):
+        print("\nCould not identify both an employee master and a punch log. "
+              "Map them by hand using docs/schema-mapping.md.", file=sys.stderr)
+        return 1
+
+    database = {
+        "driver": config.database.driver,
+        "host": config.database.host,
+        "port": config.database.port,
+        "database": config.database.database,
+        "user": config.database.user,
+        "odbc_driver": config.database.odbc_driver,
+        "dsn": config.database.dsn,
+        "path": config.database.path,
+    }
+    text = render_config(result, database=database)
+
+    if args.write:
+        path = Path(args.write)
+        if path.exists():
+            print(f"\nrefusing to overwrite {path}; choose another path or move it "
+                  "aside", file=sys.stderr)
+            return 2
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        print(f"\nwrote draft config to {path}\n"
+              f"Review it, then run: matrixreports --config {path} check "
+              "--from <date> --to <date>", file=sys.stderr)
+    else:
+        print(text)
+    return 0
 
 
 def _range_for(args: argparse.Namespace) -> tuple[date, date]:
@@ -180,6 +261,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.groups:
         config.report.max_inout_groups = args.groups
         config.report.min_inout_groups = args.groups
+
+    if args.command == "discover":
+        return _run_discover(config, args)
 
     start, end = _range_for(args)
 

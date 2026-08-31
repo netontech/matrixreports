@@ -181,3 +181,36 @@ def test_wrong_table_name_reports_a_helpful_error(tmp_path, sqlite_db, capsys):
     )
     assert main(["--config", str(path), "check", "--from", "2026-06-01"]) == 2
     assert "docs/schema-mapping.md" in capsys.readouterr().err
+
+
+def test_discover_writes_a_working_config(config_file, tmp_path, capsys):
+    out = tmp_path / "generated.yaml"
+    assert run(config_file, "discover", "--write", str(out)) == 0
+    assert out.exists()
+
+    captured = capsys.readouterr()
+    assert "Punch log" in captured.err
+    assert "AttendanceLog" in captured.err
+
+    # The generated config drives a real run with no hand editing.
+    assert main(["--config", str(out), "check", "--from", "2026-06-01"]) == 0
+    assert "24 punches, 11 breaks" in capsys.readouterr().out
+
+
+def test_discover_refuses_to_overwrite(config_file, tmp_path):
+    out = tmp_path / "existing.yaml"
+    out.write_text("# do not clobber\n", encoding="utf-8")
+    assert run(config_file, "discover", "--write", str(out)) == 2
+    assert out.read_text(encoding="utf-8") == "# do not clobber\n"
+
+
+def test_discover_prints_to_stdout_without_write(config_file, capsys):
+    assert run(config_file, "discover") == 0
+    assert "schema:" in capsys.readouterr().out
+
+
+def test_discover_needs_a_database_not_a_csv(config_file, tmp_path, capsys):
+    extract = tmp_path / "punches.csv"
+    extract.write_text("emp_id,name,timestamp\n1,A,2026-06-01 10:00:00\n", encoding="utf-8")
+    assert run(config_file, "--csv", str(extract), "discover") == 2
+    assert "cannot inspect a CSV" in capsys.readouterr().err
