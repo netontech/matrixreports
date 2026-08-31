@@ -1,0 +1,122 @@
+# ---------------------------------------------------------------------------
+# matrixreports configuration
+#
+# Copy to config/matrixreports.yaml and edit. The `schema` section is the part
+# that has to match the client's Matrix database; see docs/schema-mapping.md
+# for how to find the right table and column names in the SQL dump.
+# ---------------------------------------------------------------------------
+
+company:
+  name: "EVERYWHERE GENERAL TRADING L.L.C"
+  address: ""
+
+database:
+  # sqlite | sqlserver | mysql | postgres
+  driver: sqlserver
+  host: 192.168.1.10
+  port: 1433
+  database: COSEC
+  user: reporting
+  password: ""            # prefer a read-only login; leave blank and use `dsn`
+  odbc_driver: "ODBC Driver 17 for SQL Server"
+  # dsn: "DRIVER={ODBC Driver 17 for SQL Server};SERVER=...;DATABASE=...;Trusted_Connection=yes"
+
+# ---------------------------------------------------------------------------
+# Which tables and columns hold what. VERIFY THESE AGAINST THE ACTUAL DATABASE —
+# the names below are placeholders in the shape Matrix COSEC commonly uses, not
+# a guarantee. `matrixreports check` will tell you immediately if they are wrong.
+# ---------------------------------------------------------------------------
+schema:
+  employees:
+    table: EmployeeMaster
+    columns:
+      id: EmployeeID
+      code: EmployeeCode
+      name: EmployeeName
+      department: Department
+      designation: Designation
+      shift: ShiftCode
+    where: "IsActive = 1"          # optional extra predicate
+
+  punches:
+    table: AttendanceLog
+    columns:
+      emp_id: EmployeeID
+      timestamp: PunchDateTime     # single datetime column
+      direction: InOutFlag         # optional; omit and direction is inferred
+      device: DoorName             # optional
+    where: ""
+  # If the punch stamp is split across two columns, set this true and map
+  # `date:` and `time:` instead of `timestamp:`.
+  punch_datetime_is_split: false
+
+  # How the punch table encodes direction (compared case-insensitively as text).
+  direction_in:  ["1", "I", "IN", "ENTRY"]
+  direction_out: ["2", "O", "OUT", "EXIT"]
+
+  leave:
+    table: LeaveRegister
+    columns:
+      emp_id: EmployeeID
+      date_from: LeaveFrom
+      date_to: LeaveTo
+      code: LeaveType
+    where: "Status = 'APPROVED'"
+
+  holidays:
+    table: HolidayMaster
+    columns:
+      date: HolidayDate
+      name: HolidayName
+
+# Full SQL overrides. If a query is given here it wins over the mapping above —
+# use this when the real layout needs a join the generator cannot express.
+# Each query takes exactly two positional parameters: period start and end.
+queries: {}
+#  punches: |
+#    SELECT e.EmployeeID, l.PunchDateTime, l.InOutFlag, d.DoorName
+#    FROM AttendanceLog l
+#    JOIN EmployeeMaster e ON e.EmployeeID = l.EmployeeID
+#    LEFT JOIN DoorMaster d ON d.DoorID = l.DoorID
+#    WHERE l.PunchDateTime BETWEEN ? AND ?
+#    ORDER BY e.EmployeeID, l.PunchDateTime
+
+shift:
+  start: "10:00"
+  end: "19:00"
+  late_in_grace: "00:10"      # late after 10:10, matching the current summary
+  late_out_grace: "00:10"     # late out after 19:10
+  full_day: "09:00"
+  half_day: "04:30"
+  early_in_before: "10:00"
+  weekly_off_days: [4]        # 0=Mon 1=Tue 2=Wed 3=Thu 4=Fri 5=Sat 6=Sun
+
+# How imperfect punch data is reconciled.
+pairing:
+  dedup_seconds: 60           # collapse repeat reads of the same direction
+  direction_mode: device      # "device" trusts the IN/OUT flag; "alternate" infers it
+  open_session_policy: shift_end   # shift_end | last_punch | leave_open | drop
+  merge_breaks_under_seconds: 0    # e.g. 120 to stop door re-reads showing as breaks
+  day_start_hour: 0           # set to 4 if shifts run past midnight
+  max_session_hours: 18
+
+report:
+  max_inout_groups: 0         # 0 = size the OUT/IN block to the data (the fix)
+  min_inout_groups: 5         # keep the familiar width on quiet days
+  include_anomaly_column: true
+  absent_label: "A"
+  off_label: "OFF"
+  holiday_label: "HOL"
+  present_label: "Present"
+
+# Map the leave codes stored in the database to the labels used on the reports.
+leave_codes:
+  AL: "Annual Leave"
+  SL: "Sick Leave"
+  CL: "Casual Leave"
+  EL: "Emergency Leave"
+  UL: "Unpaid Leave"
+  CO: "Comp Off"
+  WFH: "Work From Home"
+  BT: "Business Trip"
+  OW: "Outside Work"
