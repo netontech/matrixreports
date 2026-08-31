@@ -61,6 +61,13 @@ Fill in the `database` block, then let the tool work out the schema for itself:
 matrixreports discover --write config/discovered.yaml
 ```
 
+If you have a `.sql` dump but no database to connect to, discovery reads the
+dump directly — no connection, no `database` block needed:
+
+```bash
+matrixreports discover --sql-file Cosec.sql --write config/discovered.yaml
+```
+
 `discover` reads the database catalogue, scores every table for how well it fits
 each role, samples the direction column so `IN` and `OUT` can be mapped, and
 writes a draft config annotated with what it found and why. It also reports any

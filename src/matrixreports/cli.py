@@ -24,7 +24,7 @@ from pathlib import Path
 from .builder import AttendanceBuilder
 from .config import Config
 from .datasource import SqlPunchSource, open_source
-from .discover import discover, format_report, render_config
+from .discover import discover, discover_from_sql, format_report, render_config
 from .duration import hhmm
 from .excel import write_csv, write_csvs, write_workbook
 from .reports import (
@@ -83,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-sample", action="store_true",
         help="do not read sample values from the direction column",
     )
+    discover_parser.add_argument(
+        "--sql-file", metavar="PATH", action="append", dest="sql_files",
+        help="read CREATE TABLE statements from a .sql dump instead of "
+             "connecting to a database (repeatable)",
+    )
 
     check = subparsers.add_parser("check", help="verify connectivity and show punch depth")
     check.add_argument("--from", dest="start", type=_parse_date, required=True)
@@ -122,39 +127,39 @@ def _load_config(path: str) -> Config:
     return Config.load(config_path)
 
 
-def _run_discover(config: Config, args: argparse.Namespace) -> int:
-    """Inspect the catalogue and emit a draft mapping.
+def _discover_from_files(config: Config, args: argparse.Namespace) -> int:
+    """Work out the schema from .sql dump files, with no database involved."""
+    chunks: list[str] = []
+    for name in args.sql_files:
+        path = Path(name)
+        if not path.exists():
+            print(f"no such file: {path}", file=sys.stderr)
+            return 2
+        # Dumps are frequently UTF-16 from SSMS; fall back rather than fail.
+        for encoding in ("utf-8-sig", "utf-16", "latin-1"):
+            try:
+                chunks.append(path.read_text(encoding=encoding))
+                break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        else:
+            print(f"could not decode {path} as text", file=sys.stderr)
+            return 2
 
-    Runs before any schema mapping exists, so it talks to the connection
-    directly rather than going through the punch source.
-    """
-    if args.csv_extract:
-        print("discover needs a database connection; it cannot inspect a CSV.",
+    result = discover_from_sql("\n".join(chunks))
+    if not result.tables:
+        print("no CREATE TABLE statements found in the supplied file(s).\n"
+              "If the dump is a binary backup (.bak/.mdf), restore it first, or "
+              "script the schema out of SSMS as Tasks > Generate Scripts.",
               file=sys.stderr)
-        return 2
-    try:
-        source = SqlPunchSource.__new__(SqlPunchSource)
-        source.config = config
-        source.driver = (config.database.driver or "sqlite").lower()
-        connection = source._connect(config.database)
-    except Exception as exc:                     # noqa: BLE001 - surfaced to the user
-        print(f"could not connect: {exc}\n\n"
-              "Check the `database` section of your config; see "
-              "docs/running-on-premise.md for connection strings.",
-              file=sys.stderr)
-        return 2
-
-    try:
-        result = discover(connection, source.driver,
-                          sample_directions=not args.no_sample)
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
+        return 1
 
     print(format_report(result), file=sys.stderr)
+    return _emit_config(result, config, args)
 
+
+def _emit_config(result, config: Config, args: argparse.Namespace) -> int:
+    """Render the draft config and write it, or print it."""
     if not result.best("punches") or not result.best("employees"):
         print("\nCould not identify both an employee master and a punch log. "
               "Map them by hand using docs/schema-mapping.md.", file=sys.stderr)
@@ -186,6 +191,43 @@ def _run_discover(config: Config, args: argparse.Namespace) -> int:
     else:
         print(text)
     return 0
+
+
+def _run_discover(config: Config, args: argparse.Namespace) -> int:
+    """Inspect the catalogue and emit a draft mapping.
+
+    Runs before any schema mapping exists, so it talks to the connection
+    directly rather than going through the punch source.
+    """
+    if args.sql_files:
+        return _discover_from_files(config, args)
+    if args.csv_extract:
+        print("discover needs a database connection or --sql-file; it cannot "
+              "inspect a CSV.", file=sys.stderr)
+        return 2
+    try:
+        source = SqlPunchSource.__new__(SqlPunchSource)
+        source.config = config
+        source.driver = (config.database.driver or "sqlite").lower()
+        connection = source._connect(config.database)
+    except Exception as exc:                     # noqa: BLE001 - surfaced to the user
+        print(f"could not connect: {exc}\n\n"
+              "Check the `database` section of your config; see "
+              "docs/running-on-premise.md for connection strings.",
+              file=sys.stderr)
+        return 2
+
+    try:
+        result = discover(connection, source.driver,
+                          sample_directions=not args.no_sample)
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            pass
+
+    print(format_report(result), file=sys.stderr)
+    return _emit_config(result, config, args)
 
 
 def _range_for(args: argparse.Namespace) -> tuple[date, date]:
@@ -257,7 +299,11 @@ def _run_check(book, config) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    config = _load_config(args.config)
+    if args.command == "discover" and args.sql_files and not Path(args.config).exists():
+        # Reading a dump needs no connection details, so an absent config is fine.
+        config = Config()
+    else:
+        config = _load_config(args.config)
     if args.groups:
         config.report.max_inout_groups = args.groups
         config.report.min_inout_groups = args.groups

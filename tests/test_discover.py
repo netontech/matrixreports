@@ -176,3 +176,160 @@ def test_row_counts_are_read_for_sqlite(tmp_path):
     connection.commit()
     result = discover(connection, "sqlite")
     assert result.best("employees").table.row_count == 5
+
+
+# --------------------------------------------------------------- dump parsing
+TSQL_DUMP = """
+USE [COSEC]
+GO
+SET ANSI_NULLS ON
+GO
+CREATE TABLE [dbo].[mx_employee_master](
+\t[EmployeeID] [int] IDENTITY(1,1) NOT NULL,
+\t[EmployeeCode] [varchar](20) NOT NULL,
+\t[EmployeeName] [varchar](100) NULL,
+\t[Department] [varchar](50) NULL,
+\t[IsActive] [bit] NOT NULL,
+ CONSTRAINT [PK_emp] PRIMARY KEY CLUSTERED ([EmployeeID] ASC)
+) ON [PRIMARY]
+GO
+CREATE TABLE [dbo].[mx_attendance_log](
+\t[LogID] [bigint] IDENTITY(1,1) NOT NULL,
+\t[EmployeeID] [int] NOT NULL,
+\t[PunchDateTime] [datetime] NOT NULL,
+\t[InOutFlag] [char](1) NULL,
+\t[DoorName] [varchar](50) NULL,
+ CONSTRAINT [PK_log] PRIMARY KEY CLUSTERED ([LogID] ASC)
+) ON [PRIMARY]
+GO
+CREATE TABLE [dbo].[mx_daily_attendance](
+\t[EmployeeID] [int] NOT NULL,
+\t[AttDate] [date] NOT NULL,
+\t[IN1] [datetime] NULL, [OUT1] [datetime] NULL,
+\t[IN2] [datetime] NULL, [OUT2] [datetime] NULL,
+\t[IN3] [datetime] NULL, [OUT3] [datetime] NULL,
+\t[IN4] [datetime] NULL, [OUT4] [datetime] NULL,
+\t[IN5] [datetime] NULL, [OUT5] [datetime] NULL,
+\t[IN6] [datetime] NULL, [OUT6] [datetime] NULL,
+\t[TotalHours] [decimal](5, 2) NULL
+) ON [PRIMARY]
+GO
+CREATE TABLE [dbo].[mx_leave_register](
+\t[EmployeeID] [int] NOT NULL,
+\t[LeaveFrom] [date] NOT NULL,
+\t[LeaveTo] [date] NOT NULL,
+\t[LeaveType] [varchar](10) NULL
+) ON [PRIMARY]
+GO
+INSERT [dbo].[mx_attendance_log] ([LogID],[EmployeeID],[PunchDateTime],[InOutFlag],[DoorName]) VALUES (1, 1, N'2026-06-01 09:44:00', N'I', N'Main Door')
+GO
+INSERT [dbo].[mx_attendance_log] ([LogID],[EmployeeID],[PunchDateTime],[InOutFlag],[DoorName]) VALUES (2, 1, N'2026-06-01 19:09:00', N'O', N'Main Door')
+GO
+"""
+
+MYSQL_DUMP = """
+DROP TABLE IF EXISTS `employee_master`;
+CREATE TABLE `employee_master` (
+  `emp_id` int(11) NOT NULL AUTO_INCREMENT,
+  `emp_name` varchar(100) DEFAULT NULL,
+  `dept` varchar(50) DEFAULT NULL,
+  PRIMARY KEY (`emp_id`),
+  KEY `idx_name` (`emp_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+CREATE TABLE `attendance_log` (
+  `log_id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `emp_id` int(11) NOT NULL,
+  `punch_datetime` datetime NOT NULL,
+  `in_out` tinyint(4) DEFAULT NULL,
+  PRIMARY KEY (`log_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+"""
+
+
+def test_parses_tsql_dump_into_tables_and_columns():
+    from matrixreports.discover import parse_sql_dump
+
+    tables = {table.name: table for table in parse_sql_dump(TSQL_DUMP)}
+    assert set(tables) == {
+        "mx_employee_master", "mx_attendance_log",
+        "mx_daily_attendance", "mx_leave_register",
+    }
+    columns = [column.name for column in tables["mx_attendance_log"].columns]
+    assert columns == ["LogID", "EmployeeID", "PunchDateTime", "InOutFlag", "DoorName"]
+    # Constraint lines must not become columns.
+    assert "CONSTRAINT" not in columns
+    assert tables["mx_attendance_log"].columns[2].is_datetime
+
+
+def test_discovers_roles_from_a_tsql_dump():
+    from matrixreports.discover import discover_from_sql
+
+    result = discover_from_sql(TSQL_DUMP)
+    assert result.best("employees").name == "mx_employee_master"
+    assert result.best("punches").name == "mx_attendance_log"
+    assert result.best("leave").name == "mx_leave_register"
+    assert result.best("punches").roles["timestamp"] == "PunchDateTime"
+
+
+def test_flattened_table_in_a_dump_is_flagged_and_rejected():
+    from matrixreports.discover import discover_from_sql
+
+    result = discover_from_sql(TSQL_DUMP)
+    assert [t.name for t in result.flattened] == ["mx_daily_attendance"]
+    assert result.flattened[0].flattened_slots == 12
+    assert result.best("punches").name == "mx_attendance_log"
+    assert "pre-flattened" in render_config(result).lower()
+
+
+def test_direction_values_are_read_from_insert_rows():
+    """T-SQL N'...' literals must be unwrapped, not taken literally."""
+    from matrixreports.discover import discover_from_sql
+
+    result = discover_from_sql(TSQL_DUMP)
+    assert result.direction_values == ["I", "O"]
+    text = render_config(result)
+    assert 'direction_in:  ["I"]' in text
+    assert 'direction_out: ["O"]' in text
+
+
+def test_insert_counts_stand_in_for_row_counts():
+    from matrixreports.discover import discover_from_sql
+
+    result = discover_from_sql(TSQL_DUMP)
+    assert result.best("punches").table.row_count == 2
+
+
+def test_parses_mysql_backtick_dump():
+    from matrixreports.discover import discover_from_sql, parse_sql_dump
+
+    tables = {table.name: table for table in parse_sql_dump(MYSQL_DUMP)}
+    assert set(tables) == {"employee_master", "attendance_log"}
+    columns = [column.name for column in tables["attendance_log"].columns]
+    assert columns == ["log_id", "emp_id", "punch_datetime", "in_out"]
+
+    result = discover_from_sql(MYSQL_DUMP)
+    assert result.best("punches").name == "attendance_log"
+    assert result.best("punches").roles["emp_id"] == "emp_id"
+
+
+def test_schema_only_dump_has_no_row_counts():
+    from matrixreports.discover import discover_from_sql
+
+    result = discover_from_sql(MYSQL_DUMP)
+    assert result.best("punches").table.row_count is None
+    assert result.direction_values == []
+
+
+def test_dump_with_no_create_table_yields_nothing():
+    from matrixreports.discover import parse_sql_dump
+
+    assert parse_sql_dump("SELECT 1;\nGO\n") == []
+
+
+def test_unquote_handles_tsql_and_escaped_quotes():
+    from matrixreports.discover import _unquote_sql_literal
+
+    assert _unquote_sql_literal("N'IN'") == "IN"
+    assert _unquote_sql_literal("'OUT'") == "OUT"
+    assert _unquote_sql_literal("  1  ") == "1"
+    assert _unquote_sql_literal("N'O''Brien'") == "O'Brien"

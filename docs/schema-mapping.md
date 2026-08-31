@@ -24,8 +24,24 @@ matrixreports discover --write config/discovered.yaml
 ```
 
 It inspects the database catalogue and writes a draft mapping, including a
-warning for any pre-flattened summary table it finds. The rest of this document
-covers doing it manually, and what to check in the draft.
+warning for any pre-flattened summary table it finds.
+
+Working from a dump file instead of a live connection? Point it at the `.sql`
+files and it parses the `CREATE TABLE` statements — no database required:
+
+```bash
+matrixreports discover --sql-file Cosec.sql --sql-file Cosec_data.sql \
+    --write config/discovered.yaml
+```
+
+T-SQL (`[dbo].[table]`) and MySQL (`` `table` ``) syntax are both understood, as
+are UTF-16 files, which is what SSMS writes by default. If the dump also carries
+`INSERT` statements, the direction column's values are read from them and the
+statement counts stand in for row counts — which is what distinguishes the raw
+punch log from a daily summary.
+
+The rest of this document covers doing it manually, and what to check in the
+draft.
 
 ## Finding the right tables in the SQL dump
 

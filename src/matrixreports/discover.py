@@ -617,3 +617,183 @@ def format_report(result: Discovery) -> str:
         lines.append("Direction values sampled: "
                      + ", ".join(repr(v) for v in result.direction_values))
     return "\n".join(lines)
+
+
+# ------------------------------------------------------- discovery from a dump
+# A .sql dump carries the same catalogue information as a live connection, so
+# the mapping can be produced on a machine that has the file but no database —
+# which is the usual situation when a dump has been copied off the Matrix server.
+
+_CREATE_TABLE_RE = re.compile(
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[^\s(]+)\s*\((?P<body>.*?)\)\s*"
+    r"(?:ENGINE|DEFAULT\s+CHARSET|ON\s+\[?PRIMARY|WITH\s*\(|;|GO\b)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_CONSTRAINT_START = re.compile(
+    r"^\s*(CONSTRAINT|PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|KEY|INDEX|CHECK|"
+    r"FULLTEXT|SPATIAL|PERIOD\s+FOR)\b",
+    re.IGNORECASE,
+)
+
+_INSERT_RE = re.compile(
+    r"INSERT\s+(?:INTO\s+)?(?P<name>[^\s(]+)", re.IGNORECASE
+)
+
+
+def _strip_identifier(raw: str) -> str:
+    """Reduce ``[dbo].[mx_att_log]`` or `` `db`.`log` `` to ``mx_att_log``."""
+    cleaned = raw.strip().rstrip(";")
+    part = cleaned.split(".")[-1]
+    return part.strip().strip("[]`\"'")
+
+
+def _split_columns(body: str) -> list[str]:
+    """Split a CREATE TABLE body on commas that are not inside parentheses."""
+    parts: list[str] = []
+    depth = 0
+    current: list[str] = []
+    in_string = False
+    for char in body:
+        if char == "'":
+            in_string = not in_string
+        if not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "," and depth == 0:
+                parts.append("".join(current))
+                current = []
+                continue
+        current.append(char)
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+def parse_sql_dump(text: str) -> list[TableInfo]:
+    """Extract tables and columns from the CREATE TABLE statements in a dump."""
+    tables: list[TableInfo] = []
+    seen: set[str] = set()
+
+    for match in _CREATE_TABLE_RE.finditer(text):
+        name = _strip_identifier(match.group("name"))
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+
+        columns: list[ColumnInfo] = []
+        for definition in _split_columns(match.group("body")):
+            definition = definition.strip()
+            if not definition or _CONSTRAINT_START.match(definition):
+                continue
+            tokens = definition.split()
+            if len(tokens) < 2:
+                continue
+            column_name = tokens[0].strip("[]`\"'")
+            if not column_name or not re.match(r"^[A-Za-z_@#]", column_name):
+                continue
+            data_type = tokens[1].strip("[]`\"'").split("(")[0].lower()
+            columns.append(ColumnInfo(column_name, data_type))
+
+        if columns:
+            tables.append(TableInfo(name, columns))
+
+    if tables:
+        _attach_insert_counts(text, tables)
+    return tables
+
+
+def _attach_insert_counts(text: str, tables: list[TableInfo]) -> None:
+    """Use INSERT statement counts as a stand-in for row counts.
+
+    A dump that carries data lets us tell the raw punch log (many rows per
+    employee per day) from a daily summary (one row per employee per day),
+    which is the distinction that matters most. Dumps of schema only leave the
+    counts at ``None`` and scoring falls back to names and column shapes.
+    """
+    counts: dict[str, int] = {}
+    for match in _INSERT_RE.finditer(text):
+        name = _strip_identifier(match.group("name")).lower()
+        counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return
+    for table in tables:
+        found = counts.get(table.name.lower())
+        if found:
+            table.row_count = found
+
+
+def discover_from_sql(text: str) -> Discovery:
+    """Run the same role scoring over a dump file instead of a connection."""
+    tables = parse_sql_dump(text)
+    result = Discovery(tables=tables)
+
+    result.employees = sorted(
+        (c for c in (score_employee_table(t) for t in tables) if c),
+        key=lambda c: -c.score,
+    )
+    employee_columns = set()
+    if result.employees:
+        employee_columns = {
+            column.name.upper() for column in result.employees[0].table.columns
+        }
+    result.punches = sorted(
+        (c for c in (score_punch_table(t, employee_columns) for t in tables) if c),
+        key=lambda c: -c.score,
+    )
+    result.leave = sorted(
+        (c for c in (score_leave_table(t) for t in tables) if c), key=lambda c: -c.score
+    )
+    result.holidays = sorted(
+        (c for c in (score_holiday_table(t) for t in tables) if c),
+        key=lambda c: -c.score,
+    )
+    result.flattened = [table for table in tables if table.flattened_slots >= 2]
+
+    best = result.best("punches")
+    if best:
+        result.split_datetime = "timestamp" not in best.roles
+        if "direction" in best.roles:
+            result.direction_values = _sample_direction_from_inserts(
+                text, best.name, best.table, best.roles["direction"]
+            )
+    return result
+
+
+def _sample_direction_from_inserts(
+    text: str, table_name: str, table: TableInfo, direction_column: str
+) -> list[str]:
+    """Pull the direction column's values out of the dump's INSERT rows."""
+    try:
+        position = [column.name for column in table.columns].index(direction_column)
+    except ValueError:
+        return []
+
+    pattern = re.compile(
+        r"INSERT\s+(?:INTO\s+)?[^\s(]*\b"
+        + re.escape(table_name)
+        + r"\b[^\s(]*\s*(?:\([^)]*\))?\s*VALUES\s*\((?P<values>[^)]*)\)",
+        re.IGNORECASE,
+    )
+    found: set[str] = set()
+    for count, match in enumerate(pattern.finditer(text)):
+        if count > 2000 or len(found) > 12:
+            break
+        values = _split_columns(match.group("values"))
+        if position >= len(values):
+            continue
+        value = _unquote_sql_literal(values[position])
+        if value and value.upper() != "NULL":
+            found.add(value)
+    return sorted(found)
+
+
+def _unquote_sql_literal(raw: str) -> str:
+    """Strip SQL quoting from a literal, including T-SQL's ``N'...'`` prefix."""
+    value = raw.strip()
+    match = re.match(r"^[NnBbXx]?'(?P<body>.*)'$", value, re.DOTALL)
+    if match:
+        return match.group("body").replace("''", "'")
+    return value.strip('"')

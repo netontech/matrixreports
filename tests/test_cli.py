@@ -214,3 +214,73 @@ def test_discover_needs_a_database_not_a_csv(config_file, tmp_path, capsys):
     extract.write_text("emp_id,name,timestamp\n1,A,2026-06-01 10:00:00\n", encoding="utf-8")
     assert run(config_file, "--csv", str(extract), "discover") == 2
     assert "cannot inspect a CSV" in capsys.readouterr().err
+
+
+TSQL_FIXTURE = """
+CREATE TABLE [dbo].[mx_employee_master](
+ [EmployeeID] [int] NOT NULL,
+ [EmployeeName] [varchar](100) NULL,
+ [Department] [varchar](50) NULL,
+ CONSTRAINT [PK_e] PRIMARY KEY CLUSTERED ([EmployeeID] ASC)
+) ON [PRIMARY]
+GO
+CREATE TABLE [dbo].[mx_attendance_log](
+ [EmployeeID] [int] NOT NULL,
+ [PunchDateTime] [datetime] NOT NULL,
+ [InOutFlag] [char](1) NULL
+) ON [PRIMARY]
+GO
+"""
+
+
+def test_discover_from_a_sql_dump_without_any_database(tmp_path, capsys):
+    """The dump is enough; no connection details are needed."""
+    dump = tmp_path / "Cosec.sql"
+    dump.write_text(TSQL_FIXTURE, encoding="utf-8")
+    out = tmp_path / "from_dump.yaml"
+
+    assert main(["--config", str(tmp_path / "absent.yaml"),
+                 "discover", "--sql-file", str(dump), "--write", str(out)]) == 0
+
+    captured = capsys.readouterr()
+    assert "mx_attendance_log" in captured.err
+
+    import yaml as _yaml
+    parsed = _yaml.safe_load(out.read_text(encoding="utf-8"))
+    assert parsed["schema"]["punches"]["table"] == "mx_attendance_log"
+    assert parsed["schema"]["punches"]["columns"]["timestamp"] == "PunchDateTime"
+
+
+def test_discover_accepts_several_dump_files(tmp_path, capsys):
+    first = tmp_path / "schema_a.sql"
+    second = tmp_path / "schema_b.sql"
+    first.write_text(TSQL_FIXTURE.split("GO")[0] + "GO", encoding="utf-8")
+    second.write_text("GO".join(TSQL_FIXTURE.split("GO")[1:]), encoding="utf-8")
+
+    assert main(["--config", str(tmp_path / "absent.yaml"), "discover",
+                 "--sql-file", str(first), "--sql-file", str(second)]) == 0
+    assert "mx_attendance_log" in capsys.readouterr().err
+
+
+def test_discover_reads_a_utf16_dump(tmp_path):
+    """SSMS writes UTF-16 by default."""
+    dump = tmp_path / "utf16.sql"
+    dump.write_text(TSQL_FIXTURE, encoding="utf-16")
+    out = tmp_path / "cfg.yaml"
+    assert main(["--config", str(tmp_path / "absent.yaml"), "discover",
+                 "--sql-file", str(dump), "--write", str(out)]) == 0
+    assert "mx_attendance_log" in out.read_text(encoding="utf-8")
+
+
+def test_discover_missing_dump_file(tmp_path, capsys):
+    assert main(["--config", str(tmp_path / "absent.yaml"), "discover",
+                 "--sql-file", str(tmp_path / "nope.sql")]) == 2
+    assert "no such file" in capsys.readouterr().err
+
+
+def test_discover_dump_with_no_ddl_explains_itself(tmp_path, capsys):
+    dump = tmp_path / "data_only.sql"
+    dump.write_text("INSERT INTO x VALUES (1);\n", encoding="utf-8")
+    assert main(["--config", str(tmp_path / "absent.yaml"), "discover",
+                 "--sql-file", str(dump)]) == 1
+    assert "Generate Scripts" in capsys.readouterr().err
