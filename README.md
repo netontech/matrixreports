@@ -129,6 +129,28 @@ python examples/generate_demo.py --out out/demo
 Builds a synthetic Matrix-shaped SQLite database — including staff who step out
 eight, ten and thirteen times a day — and writes all four reports.
 
+## The web app
+
+For anyone who should not have to touch a command line:
+
+```bash
+pip install -e ".[web]"
+matrixreports-web --config config/matrixreports.yaml      # http://127.0.0.1:8000
+```
+
+Pick a report and a date, and it renders in the browser laid out the way the
+client's sheet is laid out — company header, the numbered group band, the same
+`OUT`/`IN`/`MINS` triples — except the band grows to as many groups as the day
+actually needs. A banner states how many breaks exceed what the stock report can
+show. `.xlsx` and `.csv` download from the same view.
+
+Leave **Groups** blank to size the layout to the data, or pin it to `5` to
+reproduce the legacy width for a side-by-side comparison with an existing sheet.
+
+The browser view and the workbook render the *same* `ReportTable`, so they
+cannot drift apart. Like the CLI, the app only ever issues `SELECT`, holds no
+state, and re-reads the database on every request.
+
 ## Reports
 
 | Command | Shape |

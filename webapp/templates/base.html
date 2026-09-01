@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Attendance{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Attendance Reports</div>
+  <div class="tag">unlimited in/out</div>
+</header>
+<main>
+<form class="controls" method="get" action="/">
+  <label>Report
+    <select name="report">
+      {% for key, label in reports.items() %}
+      <option value="{{ key }}" {% if key == kind %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Date <input type="date" name="date" value="{{ day.isoformat() }}" required></label>
+  <label>Employees <input type="text" name="employee" value="{{ employees }}" placeholder="all"></label>
+  <label>Groups <input type="number" name="groups" value="{{ groups }}" min="0" max="30" placeholder="auto"></label>
+  <button type="submit">Generate</button>
+</form>
+{% if error %}<div class="error"><strong>Could not build the report.</strong><br>{{ error }}</div>{% endif %}
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>

@@ -17,14 +17,17 @@ dependencies = [
 sqlserver = ["pyodbc>=5.0"]
 mysql = ["PyMySQL>=1.1"]
 postgres = ["psycopg2-binary>=2.9"]
-dev = ["pytest>=7.4"]
+web = ["Flask>=3.0"]
+dev = ["pytest>=7.4", "Flask>=3.0"]
 
 [project.scripts]
 matrixreports = "matrixreports.cli:main"
+matrixreports-web = "webapp.app:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["matrixreports*", "webapp*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]

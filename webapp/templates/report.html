@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ tables[0].title }}{% endblock %}
+{% block body %}
+<div class="actions">
+  <span class="stat"><b>{{ max_breaks }}</b> breaks on the deepest day</span>
+  <span class="stat"><b>{{ max_punches }}</b> punches</span>
+  {% if max_breaks > 5 %}
+  <span class="stat warn">{{ max_breaks - 5 }} more than the stock report can show</span>
+  {% endif %}
+  <a class="btn" href="/download.xlsx?{{ query }}">Download .xlsx</a>
+  <a class="btn ghost" href="/download.csv?{{ query }}">.csv</a>
+</div>
+
+{% for table in tables %}
+<section class="sheet">
+  {% if table.company %}<div class="company">{{ table.company }}</div>{% endif %}
+  <div class="title">{{ table.title }}</div>
+  {% if table.subtitle %}<div class="subtitle">{{ table.subtitle }}</div>{% endif %}
+
+  <div class="scroll">
+  <table>
+    <thead>
+      {% set spans = band(table) %}
+      {% if spans %}
+      <tr class="groupband">
+        {% for label, span in spans %}
+          <th colspan="{{ span }}" class="{{ 'g' if label else 'gblank' }}">{{ label }}</th>
+        {% endfor %}
+      </tr>
+      {% endif %}
+      <tr>
+        {% for column in table.columns %}<th>{{ column.header }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row, rowclass in render_rows(table) %}
+      <tr class="{{ rowclass }}">
+        {% for cell in row %}
+        <td class="{{ cell_class(cell) }}"{% if cell.note %} title="{{ cell.note }}"{% endif %}>{{ cell_text(cell) }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  {% if table.notes %}
+  <ul class="notes">{% for note in table.notes %}<li>{{ note }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}
