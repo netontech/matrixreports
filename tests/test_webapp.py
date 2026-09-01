@@ -196,3 +196,67 @@ def test_filter_and_print_controls_are_present(client):
     html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
     assert 'id="filter"' in html
     assert 'id="print"' in html
+
+
+# --- period bands (the shape the client's own sheets use) ------------------
+
+def test_weekly_report_bands_columns_by_week_number(client):
+    """Their weekly sheet is read by 'Week 23', not by a date range."""
+    html = client.get("/?report=weekly&date=2026-06-01").get_data(as_text=True)
+    band = re.search(r'<tr class="groupband">(.*?)</tr>', html, re.S)
+    assert band, "weekly report should carry a band row"
+    assert re.search(r">Week \d+<", band.group(1))
+
+
+def test_monthly_report_bands_columns_by_weekday(client):
+    """Weekends are spotted by day name; the day number alone does not show them."""
+    html = client.get("/?report=monthly&date=2026-06-01").get_data(as_text=True)
+    band = re.search(r'<tr class="groupband">(.*?)</tr>', html, re.S)
+    assert band
+    labels = re.findall(r">([A-Z][a-z]{2})</th>", band.group(1))
+    assert {"Sat", "Sun"} <= set(labels)
+
+
+def test_band_spans_cover_every_column_exactly(client):
+    """A short band row silently misaligns every header beneath it."""
+    for kind in ("daily", "weekly", "monthly"):
+        html = client.get(f"/?report={kind}&date=2026-06-01").get_data(as_text=True)
+        band = re.search(r'<tr class="groupband">(.*?)</tr>', html, re.S)
+        if not band:
+            continue
+        spans = [int(n) for n in re.findall(r'colspan="(\d+)"', band.group(1))]
+        cols = len(re.findall(r"<th[^>]*data-col=", html))
+        assert sum(spans) == cols, f"{kind}: band covers {sum(spans)} of {cols} columns"
+
+
+# --- clearing ---------------------------------------------------------------
+
+def test_clear_button_appears_only_when_a_selection_is_set(client):
+    plain = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'id="clear-selections"' not in plain
+
+    filtered = client.get("/?report=daily&date=2026-06-01&employee=E1").get_data(as_text=True)
+    assert 'id="clear-selections"' in filtered
+
+
+def test_clear_link_drops_the_selections_but_keeps_the_report_and_date(client):
+    html = client.get("/?report=daily&date=2026-06-01&employee=E1&groups=7").get_data(as_text=True)
+    link = re.search(r'id="clear-selections"[^>]*href="([^"]+)"', html)
+    assert link, "expected a clear link"
+    href = link.group(1)
+    assert "report=daily" in href and "date=2026-06-01" in href
+    assert "employee=" not in href and "groups=" not in href
+
+
+def test_filter_has_a_clear_control(client):
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'id="clear-filter"' in html
+
+
+def test_weekly_spans_several_weeks_for_comparison(client):
+    """One week per page loses the trend, which is the point of their sheet."""
+    html = client.get("/?report=weekly&date=2026-06-01").get_data(as_text=True)
+    band = re.search(r'<tr class="groupband">(.*?)</tr>', html, re.S)
+    weeks = re.findall(r">Week (\d+)</th>", band.group(1))
+    assert len(weeks) > 1, "weekly should put several weeks across the page"
+    assert [int(w) for w in weeks] == sorted(int(w) for w in weeks)

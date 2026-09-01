@@ -42,6 +42,9 @@ app = Flask(__name__)
 app.config["MATRIX_CONFIG"] = os.environ.get("MATRIXREPORTS_CONFIG", "config/matrixreports.yaml")
 app.before_request(require_login)
 
+# How many weeks the weekly report spans, ending on the selected week.
+WEEKLY_WEEKS = 13
+
 REPORTS = {
     "daily": "Daily attendance",
     "summary": "Daily exception summary",
@@ -59,8 +62,11 @@ def _range(kind: str, day: date) -> tuple[date, date]:
     if kind in {"daily", "summary"}:
         return day, day
     if kind == "weekly":
-        start = day - timedelta(days=day.weekday())
-        return start, start + timedelta(days=6)
+        # Their weekly sheet puts many weeks across the page so the trend is
+        # visible; one week per report would lose the comparison that makes it
+        # useful. Show a rolling quarter ending on the selected week.
+        end = day + timedelta(days=6 - day.weekday())
+        return end - timedelta(weeks=WEEKLY_WEEKS) + timedelta(days=1), end
     if kind == "monthly":
         start = day.replace(day=1)
         nxt = (start + timedelta(days=32)).replace(day=1)

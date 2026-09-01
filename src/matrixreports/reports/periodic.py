@@ -21,12 +21,20 @@ from .base import Cell, Column, ReportTable, code, duration, integer, percent, t
 
 @dataclass(frozen=True, slots=True)
 class Period:
-    """One column of a grid report."""
+    """One column of a grid report.
+
+    ``band`` is the label in the merged row above the column headers: the
+    weekday for a day column, the week number for a week. The client's sheets
+    carry both, and they are how the sheet is actually read - a weekend is
+    spotted by its day name, and a week is referred to by its number, not by
+    its date range.
+    """
 
     key: str
     label: str
     start: date
     end: date
+    band: str = ""
 
     def contains(self, day: date) -> bool:
         return self.start <= day <= self.end
@@ -34,7 +42,7 @@ class Period:
 
 def daily_periods(book: AttendanceBook) -> list[Period]:
     return [
-        Period(day.isoformat(), f"{day:%d}", day, day)
+        Period(day.isoformat(), f"{day:%d}", day, day, band=f"{day:%a}")
         for day in book.days
     ]
 
@@ -52,6 +60,7 @@ def weekly_periods(book: AttendanceBook, week_start: int = 0) -> list[Period]:
                 f"{cursor:%d %b %Y} - {end:%d %b %Y}",
                 cursor,
                 end,
+                band=f"Week {iso_week}",
             )
         )
         cursor = end + timedelta(days=1)
@@ -64,7 +73,8 @@ def monthly_periods(book: AttendanceBook) -> list[Period]:
     while cursor <= book.end:
         last_day = calendar.monthrange(cursor.year, cursor.month)[1]
         end = cursor.replace(day=last_day)
-        periods.append(Period(f"{cursor:%Y-%m}", f"{cursor:%b %Y}", cursor, end))
+        periods.append(Period(f"{cursor:%Y-%m}", f"{cursor:%b %Y}", cursor, end,
+                              band=f"{cursor:%Y}"))
         cursor = end + timedelta(days=1)
     return periods
 
@@ -119,12 +129,22 @@ def build_grid_report(
         Column("Attendance %", "percent", 11.0),
     ]
 
+    leading, trailing = 3, len(columns) - 3 - len(periods)
+    group_spans: list[tuple[str, int]] = []
+    if any(period.band for period in periods):
+        group_spans.append(("", leading))
+        for period in periods:
+            group_spans.append((period.band, 1))
+        if trailing:
+            group_spans.append(("", trailing))
+
     table = ReportTable(
         key=key,
         title=title,
         subtitle=f"{book.start:%d %b %Y} to {book.end:%d %b %Y}",
         company=config.company.name,
         columns=columns,
+        group_spans=group_spans,
         meta={"periods": [p.key for p in periods]},
     )
 

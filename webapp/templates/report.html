@@ -19,8 +19,12 @@
     <b>{{ max_breaks - 5 }}</b> more than the stock report can show</span>
   {% endif %}
   <span class="spacer"></span>
-  <input type="search" id="filter" placeholder="Filter employees&hellip;" aria-label="Filter employees"
-         style="height:34px;min-width:200px">
+  <span class="filterbox">
+    <input type="search" id="filter" placeholder="Filter employees&hellip;"
+           aria-label="Filter employees" autocomplete="off">
+    <button type="button" id="clear-filter" title="Clear filter (Esc)"
+            aria-label="Clear filter" hidden>&times;</button>
+  </span>
   <a class="btn ghost" href="/download.xlsx?{{ query }}">Excel</a>
   <a class="btn ghost" href="/download.csv?{{ query }}">CSV</a>
   <button type="button" class="btn ghost no-print" id="print">Print</button>

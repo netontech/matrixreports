@@ -26,6 +26,17 @@
   var printBtn = document.getElementById("print");
   if (printBtn) printBtn.addEventListener("click", function () { window.print(); });
 
+  // Esc anywhere outside a field clears the filter too - the fastest way back
+  // to the whole sheet after hunting for one person.
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    var box = document.getElementById("filter");
+    if (box && box.value && document.activeElement !== box) {
+      box.value = "";
+      box.dispatchEvent(new Event("input"));
+    }
+  });
+
   // --- pin the second column beside the first ------------------------------
   // Its offset depends on the rendered width of column one, so measure it.
   function pin() {
@@ -41,28 +52,46 @@
 
   // --- filter --------------------------------------------------------------
   var filter = document.getElementById("filter");
-  if (filter) {
-    filter.addEventListener("input", function () {
-      var needle = filter.value.trim().toLowerCase();
-      document.querySelectorAll("[data-sheet]").forEach(function (sheet) {
-        var shown = 0;
-        sheet.querySelectorAll("tbody tr").forEach(function (row) {
-          var cells = row.querySelectorAll("td");
-          var hay = "";
-          for (var i = 0; i < Math.min(3, cells.length); i++) hay += " " + cells[i].textContent;
-          var match = !needle || hay.toLowerCase().indexOf(needle) !== -1;
-          row.hidden = !match;
-          if (match) shown++;
-        });
-        var count = sheet.querySelector("[data-count]");
-        if (count) {
-          var total = sheet.querySelectorAll("tbody tr").length;
-          count.textContent = shown === total
-            ? total + " rows"
-            : shown + " of " + total + " rows";
-        }
+  var clearFilter = document.getElementById("clear-filter");
+
+  function applyFilter() {
+    var needle = filter.value.trim().toLowerCase();
+    document.querySelectorAll("[data-sheet]").forEach(function (sheet) {
+      var rows = sheet.querySelectorAll("tbody tr");
+      var shown = 0;
+      rows.forEach(function (row) {
+        var cells = row.querySelectorAll("td");
+        var hay = "";
+        for (var i = 0; i < Math.min(3, cells.length); i++) hay += " " + cells[i].textContent;
+        var match = !needle || hay.toLowerCase().indexOf(needle) !== -1;
+        row.hidden = !match;
+        if (match) shown++;
       });
+      var count = sheet.querySelector("[data-count]");
+      if (count) {
+        count.textContent = shown === rows.length
+          ? rows.length + " rows"
+          : shown + " of " + rows.length + " rows";
+        count.classList.toggle("filtered", shown !== rows.length);
+      }
     });
+    if (clearFilter) clearFilter.hidden = needle === "";
+  }
+
+  function resetFilter() {
+    filter.value = "";
+    applyFilter();
+    filter.focus();
+  }
+
+  if (filter) {
+    filter.addEventListener("input", applyFilter);
+    filter.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") { event.preventDefault(); resetFilter(); }
+    });
+    if (clearFilter) clearFilter.addEventListener("click", resetFilter);
+    // A browser may restore a typed value on back-navigation.
+    if (filter.value) applyFilter();
   }
 
   // --- sort ----------------------------------------------------------------

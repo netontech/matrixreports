@@ -113,6 +113,17 @@ select{cursor:pointer}
 .chip.alert b{color:var(--over)}
 .summary .spacer{margin-left:auto}
 
+.filterbox{position:relative;display:inline-flex;align-items:center}
+.filterbox input{height:34px;min-width:210px;padding-right:30px}
+.filterbox input::-webkit-search-cancel-button{display:none}
+.filterbox button{position:absolute;right:5px;width:22px;height:22px;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  border:0;border-radius:50%;background:var(--line-soft);color:var(--ink-2);
+  font-size:15px;line-height:1;cursor:pointer}
+.filterbox button:hover{background:var(--line);color:var(--ink)}
+.filterbox button[hidden]{display:none}
+.chip.filtered{background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
+
 /* --- the sheet ----------------------------------------------------------- */
 .sheet{background:var(--surface);border:1px solid var(--line-soft);
   border-radius:var(--radius);box-shadow:var(--shadow-2);overflow:hidden;

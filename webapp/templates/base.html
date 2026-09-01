@@ -48,6 +48,11 @@
   </div>
 
   <button type="submit" class="btn">Generate</button>
+  {% if employees or groups %}
+  <a class="btn ghost" id="clear-selections"
+     href="/?report={{ kind }}&date={{ day.isoformat() }}"
+     title="Clear employee codes and group width">Clear</a>
+  {% endif %}
 </form>
 
 {% if error %}
