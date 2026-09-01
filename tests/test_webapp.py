@@ -231,12 +231,25 @@ def test_band_spans_cover_every_column_exactly(client):
 
 # --- clearing ---------------------------------------------------------------
 
-def test_clear_button_appears_only_when_a_selection_is_set(client):
-    plain = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
-    assert 'id="clear-selections"' not in plain
+def test_clear_button_is_always_present(client):
+    """It must be visible before you need it, not appear once you are stuck.
 
-    filtered = client.get("/?report=daily&date=2026-06-01&employee=E1").get_data(as_text=True)
-    assert 'id="clear-selections"' in filtered
+    Hiding it until a selection existed meant the control could not be found
+    when someone went looking for it.
+    """
+    plain = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'id="clear-selections"' in plain
+
+    selected = client.get("/?report=daily&date=2026-06-01&employee=E1").get_data(as_text=True)
+    assert 'id="clear-selections"' in selected
+
+
+def test_clear_button_knows_whether_the_query_needs_reloading(client):
+    """Sorting and filtering clear in place; a selection needs a round trip."""
+    plain = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'data-dirty="0"' in plain
+    selected = client.get("/?report=daily&date=2026-06-01&employee=E1").get_data(as_text=True)
+    assert 'data-dirty="1"' in selected
 
 
 def test_clear_link_drops_the_selections_but_keeps_the_report_and_date(client):

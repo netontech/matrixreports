@@ -48,11 +48,10 @@
   </div>
 
   <button type="submit" class="btn">Generate</button>
-  {% if employees or groups %}
   <a class="btn ghost" id="clear-selections"
      href="/?report={{ kind }}&date={{ day.isoformat() }}"
-     title="Clear employee codes and group width">Clear</a>
-  {% endif %}
+     data-dirty="{{ 1 if (employees or groups) else 0 }}"
+     title="Clear the employee codes, group width, filter and sorting">Clear all</a>
 </form>
 
 {% if error %}

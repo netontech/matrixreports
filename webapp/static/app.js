@@ -94,6 +94,22 @@
     if (filter.value) applyFilter();
   }
 
+  // --- clear all -----------------------------------------------------------
+  // Always present, so there is one obvious way back to an untouched sheet.
+  // Sorting and the live filter are client-side, so clear those in place and
+  // only reload when the query string actually carries a selection.
+  var clearAll = document.getElementById("clear-selections");
+  if (clearAll) clearAll.addEventListener("click", function (event) {
+    var dirtyQuery = clearAll.dataset.dirty === "1";
+    if (filter && filter.value) { filter.value = ""; applyFilter(); }
+    document.querySelectorAll("thead th[aria-sort]").forEach(function (header) {
+      header.removeAttribute("aria-sort");
+      var arrow = header.querySelector(".arrow");
+      if (arrow) arrow.textContent = "\u25BE";
+    });
+    if (!dirtyQuery) event.preventDefault();   // nothing in the URL to drop
+  });
+
   // --- sort ----------------------------------------------------------------
   // Times and durations are HH:MM, so comparing minutes keeps them in order;
   // plain lexical sort would put 9:05 after 10:00.
