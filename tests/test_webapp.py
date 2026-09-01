@@ -124,3 +124,20 @@ def test_a_broken_config_reports_the_problem(client, tmp_path):
     response = client.get("/?report=daily&date=2026-06-01")
     assert response.status_code == 500
     assert b"Could not build the report" in response.data
+
+
+def test_a_date_with_no_punches_says_so(client):
+    """An empty day must not look like a real report.
+
+    The layout falls back to five groups when there are no breaks, which is
+    deliberate - but without this notice an empty day is indistinguishable from
+    a working one, which is how a wrong date goes unnoticed.
+    """
+    response = client.get("/?report=daily&date=2026-07-15")
+    assert response.status_code == 200
+    assert b"No punches found" in response.data
+
+
+def test_a_day_with_punches_shows_no_empty_notice(client):
+    response = client.get("/?report=daily&date=2026-06-01")
+    assert b"No punches found" not in response.data

@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ tables[0].title }}{% endblock %}
 {% block body %}
+{% if max_punches == 0 %}
+<div class="empty-result">
+  <strong>No punches found for {{ day.strftime('%d %B %Y') }}.</strong>
+  The layout below is the default five groups, not a reading of the data &mdash;
+  every row is blank. Check the date, or that this day is inside the range the
+  database covers.
+</div>
+{% endif %}
 <div class="actions">
   <span class="stat"><b>{{ max_breaks }}</b> breaks on the deepest day</span>
   <span class="stat"><b>{{ max_punches }}</b> punches</span>
