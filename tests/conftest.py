@@ -155,3 +155,36 @@ def sqlite_config(sqlite_db: Path) -> Config:
             "leave_codes": {"SL": "Sick Leave"},
         }
     )
+
+
+# --- web app -------------------------------------------------------------------
+
+@pytest.fixture
+def web_config_file(tmp_path, sqlite_db):
+    import yaml
+    path = tmp_path / "web.yaml"
+    path.write_text(yaml.safe_dump({
+        "company": {"name": "Test Co"},
+        "database": {"driver": "sqlite", "path": str(sqlite_db)},
+        "schema": {
+            "employees": {"table": "EmployeeMaster",
+                          "columns": {"id": "EmployeeID", "code": "EmployeeCode",
+                                      "name": "EmployeeName", "department": "Department"},
+                          "where": "IsActive = 1"},
+            "punches": {"table": "AttendanceLog",
+                        "columns": {"emp_id": "EmployeeID", "timestamp": "PunchDateTime",
+                                    "direction": "InOutFlag", "device": "DoorName"}},
+            "direction_in": ["1"], "direction_out": ["2"],
+        },
+        "shift": {"start": "10:00", "end": "19:00", "weekly_off_days": [4]},
+    }), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def client(web_config_file):
+    pytest.importorskip("flask")
+    from webapp.app import app as flask_app
+    flask_app.config.update(TESTING=True, MATRIX_CONFIG=str(web_config_file))
+    with flask_app.test_client() as test_client:
+        yield test_client

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import tempfile
 from pathlib import Path
 from datetime import date, datetime, timedelta
@@ -33,10 +34,13 @@ from matrixreports.reports import (
     build_yearly_report,
 )
 
+from .auth import (InsecureBindError, guard_bind, hash_password,
+                   require_login)
 from .render import band, cell_class, cell_text, render_rows
 
 app = Flask(__name__)
 app.config["MATRIX_CONFIG"] = os.environ.get("MATRIXREPORTS_CONFIG", "config/matrixreports.yaml")
+app.before_request(require_login)
 
 REPORTS = {
     "daily": "Daily attendance",
@@ -154,7 +158,29 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--hash-password", action="store_true",
+                        help="prompt for a password and print its hash, for "
+                             "MATRIXREPORTS_AUTH_PASSWORD_HASH")
     args = parser.parse_args()
+
+    if args.hash_password:
+        import getpass
+        first = getpass.getpass("password: ")
+        if first != getpass.getpass("again: "):
+            print("passwords did not match", file=sys.stderr)
+            return 1
+        if len(first) < 12:
+            print("use at least 12 characters", file=sys.stderr)
+            return 1
+        print(hash_password(first))
+        return 0
+
+    try:
+        guard_bind(args.host)
+    except InsecureBindError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     app.config["MATRIX_CONFIG"] = args.config
     print(f"matrixreports web on http://{args.host}:{args.port}  (config: {args.config})")
     app.run(host=args.host, port=args.port, debug=args.debug)
