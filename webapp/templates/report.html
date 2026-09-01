@@ -1,29 +1,38 @@
 {% extends "base.html" %}
 {% block title %}{{ tables[0].title }}{% endblock %}
 {% block body %}
+
 {% if max_punches == 0 %}
-<div class="empty-result">
+<div class="notice warn" role="status">
   <strong>No punches found for {{ day.strftime('%d %B %Y') }}.</strong>
   The layout below is the default five groups, not a reading of the data &mdash;
-  every row is blank. Check the date, or that this day is inside the range the
+  every row is blank. Check the date, or that this day falls inside the range the
   database covers.
 </div>
 {% endif %}
-<div class="actions">
-  <span class="stat"><b>{{ max_breaks }}</b> breaks on the deepest day</span>
-  <span class="stat"><b>{{ max_punches }}</b> punches</span>
+
+<div class="summary">
+  <span class="chip"><b>{{ max_breaks }}</b> breaks on the deepest day</span>
+  <span class="chip"><b>{{ max_punches }}</b> punches</span>
   {% if max_breaks > 5 %}
-  <span class="stat warn">{{ max_breaks - 5 }} more than the stock report can show</span>
+  <span class="chip alert" title="The stock Matrix report stops at five breaks">
+    <b>{{ max_breaks - 5 }}</b> more than the stock report can show</span>
   {% endif %}
-  <a class="btn" href="/download.xlsx?{{ query }}">Download .xlsx</a>
-  <a class="btn ghost" href="/download.csv?{{ query }}">.csv</a>
+  <span class="spacer"></span>
+  <input type="search" id="filter" placeholder="Filter employees&hellip;" aria-label="Filter employees"
+         style="height:34px;min-width:200px">
+  <a class="btn ghost" href="/download.xlsx?{{ query }}">Excel</a>
+  <a class="btn ghost" href="/download.csv?{{ query }}">CSV</a>
+  <button type="button" class="btn ghost no-print" id="print">Print</button>
 </div>
 
 {% for table in tables %}
-<section class="sheet">
-  {% if table.company %}<div class="company">{{ table.company }}</div>{% endif %}
-  <div class="title">{{ table.title }}</div>
-  {% if table.subtitle %}<div class="subtitle">{{ table.subtitle }}</div>{% endif %}
+<section class="sheet" data-sheet>
+  <div class="sheet-head">
+    {% if table.company %}<div class="company">{{ table.company }}</div>{% endif %}
+    <div class="title">{{ table.title }}</div>
+    {% if table.subtitle %}<div class="subtitle">{{ table.subtitle }}</div>{% endif %}
+  </div>
 
   <div class="scroll">
   <table>
@@ -31,20 +40,30 @@
       {% set spans = band(table) %}
       {% if spans %}
       <tr class="groupband">
-        {% for label, span in spans %}
-          <th colspan="{{ span }}" class="{{ 'g' if label else 'gblank' }}">{{ label }}</th>
-        {% endfor %}
+        {% for label, span in spans %}<th colspan="{{ span }}">{{ label }}</th>{% endfor %}
       </tr>
       {% endif %}
-      <tr>
-        {% for column in table.columns %}<th>{{ column.header }}</th>{% endfor %}
+      <tr class="cols">
+        {% for column in table.columns %}
+        <th {% if loop.index <= 2 %}class="sortable pin-{{ loop.index }}"{% else %}class="sortable"{% endif %}
+            data-col="{{ loop.index0 }}" tabindex="0" role="columnheader"
+            title="Sort by {{ column.header }}">{{ column.header }}<span class="arrow">&#9662;</span></th>
+        {% endfor %}
       </tr>
     </thead>
     <tbody>
       {% for row, rowclass in render_rows(table) %}
-      <tr class="{{ rowclass }}">
+      {% set outs = namespace(n=0) %}
+      {% for column in table.columns %}
+        {% if column.header == 'No. Of OUT' and row[loop.index0].value %}
+          {% set outs.n = row[loop.index0].value %}
+        {% endif %}
+      {% endfor %}
+      <tr class="{{ rowclass }}{% if outs.n is number and outs.n > 5 %} over{% endif %}"
+          {% if outs.n is number and outs.n > 5 %}title="{{ outs.n }} breaks - the stock report can show five"{% endif %}>
         {% for cell in row %}
-        <td class="{{ cell_class(cell) }}"{% if cell.note %} title="{{ cell.note }}"{% endif %}>{{ cell_text(cell) }}</td>
+        <td class="{{ cell_class(cell) }}{% if loop.index <= 2 %} pin-{{ loop.index }}{% endif %}"
+            {% if cell.note %}title="{{ cell.note }}"{% endif %}>{{ cell_text(cell) }}</td>
         {% endfor %}
       </tr>
       {% endfor %}
@@ -52,9 +71,10 @@
   </table>
   </div>
 
-  {% if table.notes %}
-  <ul class="notes">{% for note in table.notes %}<li>{{ note }}</li>{% endfor %}</ul>
-  {% endif %}
+  <div class="sheet-foot">
+    {% if table.notes %}<span>{{ table.notes|join(' &middot; '|safe) }}</span>{% endif %}
+    <span class="count" data-count>{{ table.rows|length }} rows</span>
+  </div>
 </section>
 {% endfor %}
 {% endblock %}

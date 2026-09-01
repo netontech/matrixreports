@@ -55,10 +55,19 @@ def group_numbers(html: str) -> list[str]:
     return re.findall(r">(\d+)</th>", band.group(1)) if band else []
 
 
+def mins_columns(html: str) -> int:
+    """Count MINS *column headers* only.
+
+    Not bare occurrences of the word - the headers also carry a "Sort by MINS"
+    tooltip, and counting those double-counts every group.
+    """
+    return len(re.findall(r"<th[^>]*>MINS<", html))
+
+
 def test_landing_page_renders_without_a_date(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert b"Pick a date" in response.data
+    assert b"Choose a report" in response.data
 
 
 def test_daily_report_grows_past_the_five_group_ceiling(client):
@@ -68,7 +77,7 @@ def test_daily_report_grows_past_the_five_group_ceiling(client):
     html = response.get_data(as_text=True)
 
     assert group_numbers(html)[-1] == "11"
-    assert html.count("MINS") == 11
+    assert mins_columns(html) == 11
     # The banner has to state the gap, since that is the whole argument.
     assert "more than the stock report can show" in html
 
@@ -77,20 +86,20 @@ def test_groups_can_be_pinned_to_the_old_width(client):
     """Pinning to 5 reproduces the legacy layout for side-by-side comparison."""
     html = client.get("/?report=daily&date=2026-06-01&groups=5").get_data(as_text=True)
     assert group_numbers(html)[-1] == "5"
-    assert html.count("MINS") == 5
+    assert mins_columns(html) == 5
 
 
 @pytest.mark.parametrize("kind", ["daily", "summary", "weekly", "monthly", "yearly"])
 def test_every_report_type_renders(client, kind):
     response = client.get(f"/?report={kind}&date=2026-06-01")
     assert response.status_code == 200
-    assert b'<section class="sheet">' in response.data
+    assert b"data-sheet" in response.data
 
 
 def test_durations_render_as_hhmm_not_decimals(client):
     """The legacy sheets wrote 8.14 for 8h14m and then summed it. Never that."""
     html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
-    cells = re.findall(r'<td class="num">([^<]*)</td>', html)
+    cells = re.findall(r'<td class="num[^"]*"[^>]*>([^<]*)</td>', html)
     times = [c for c in cells if c.strip()]
     assert times, "expected some numeric cells"
     assert not any(re.fullmatch(r"\d+\.\d\d", c) for c in times)
@@ -141,3 +150,49 @@ def test_a_date_with_no_punches_says_so(client):
 def test_a_day_with_punches_shows_no_empty_notice(client):
     response = client.get("/?report=daily&date=2026-06-01")
     assert b"No punches found" not in response.data
+
+
+# --- interface behaviour ---------------------------------------------------
+
+def test_rows_past_the_ceiling_are_marked(client):
+    """The row that broke the old report is the one a reader is looking for."""
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    over = re.findall(r'<tr class="[^"]*\bover\b[^"]*"[^>]*>', html)
+    assert over, "expected the 11-break day to be flagged"
+    assert 'title="11 breaks' in html
+
+
+def test_quiet_rows_are_not_marked(client):
+    """The light day has 2 breaks and must not be flagged."""
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    body = html.split("<tbody>")[1]
+    assert len(re.findall(r"<tr", body)) > len(re.findall(r'<tr class="[^"]*\bover\b', body))
+
+
+def test_identity_columns_are_pinned(client):
+    """A 46-column row is unreadable if the name scrolls away."""
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'pin-1' in html and 'pin-2' in html
+
+
+def test_columns_are_sortable(client):
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'class="sortable' in html
+    assert 'role="columnheader"' in html
+    assert 'tabindex="0"' in html          # sortable by keyboard, not just mouse
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("daily", "2026-05-31"), ("summary", "2026-05-31"),
+    ("weekly", "2026-05-25"), ("monthly", "2026-05-01"), ("yearly", "2025-06-01"),
+])
+def test_previous_link_steps_in_the_reports_own_units(client, kind, expected):
+    """A month report should step a month, not a day."""
+    html = client.get(f"/?report={kind}&date=2026-06-01").get_data(as_text=True)
+    assert f"date={expected}" in html
+
+
+def test_filter_and_print_controls_are_present(client):
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'id="filter"' in html
+    assert 'id="print"' in html

@@ -1,9 +1,11 @@
 {% extends "base.html" %}
+{% block title %}Attendance reports{% endblock %}
 {% block body %}
 <div class="empty">
-  <h1>Pick a date and generate</h1>
-  <p>The report grows an <strong>OUT / IN / MINS</strong> group for every break
-     the day actually contains. Leave <em>Groups</em> blank to size it to the
-     data, or pin it to a fixed width to match an existing sheet.</p>
+  <h1>Choose a report and a date</h1>
+  <p>Each report grows an <strong>OUT / IN / MINS</strong> group for every break the
+     day actually contains &mdash; there is no fixed limit of five. Leave
+     <em>Groups</em> blank to size the layout to the data, or set it to
+     <strong>5</strong> to reproduce the old sheet for a side-by-side comparison.</p>
 </div>
 {% endblock %}

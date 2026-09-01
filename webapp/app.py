@@ -110,25 +110,46 @@ def _form_args():
     return kind, day, groups, employees
 
 
+def _step(kind: str, day: date, delta: int) -> date:
+    """Previous/next in the units the chosen report actually moves in."""
+    if kind in {"daily", "summary"}:
+        return day + timedelta(days=delta)
+    if kind == "weekly":
+        return day + timedelta(weeks=delta)
+    if kind == "monthly":
+        first = day.replace(day=1)
+        return (first + timedelta(days=32 * delta)).replace(day=1) if delta > 0 \
+            else (first - timedelta(days=1)).replace(day=1)
+    return day.replace(year=day.year + delta)
+
+
+def _shell(kind, day, groups, employees, **extra):
+    """Everything the chrome needs, whichever template renders."""
+    return dict(
+        reports=REPORTS, kind=kind, day=day,
+        groups=groups or "", employees=",".join(employees),
+        prev_day=_step(kind, day, -1), next_day=_step(kind, day, 1),
+        today=date.today(), **extra,
+    )
+
+
 @app.route("/")
 def index():
     kind, day, groups, employees = _form_args()
     if "date" not in request.args:
-        return render_template("index.html", reports=REPORTS, kind=kind, day=day,
-                               groups=groups or "", employees=",".join(employees))
+        return render_template("index.html", **_shell(kind, day, groups, employees))
     try:
         tables, book, config = _build(kind, day, groups, employees)
     except Exception as exc:                          # noqa: BLE001 - shown to the user
-        return render_template("index.html", reports=REPORTS, kind=kind, day=day,
-                               groups=groups or "", employees=",".join(employees),
-                               error=str(exc)), 500
+        return render_template("index.html",
+                               **_shell(kind, day, groups, employees, error=str(exc))), 500
     return render_template(
-        "report.html", reports=REPORTS, kind=kind, day=day,
-        groups=groups or "", employees=",".join(employees),
-        tables=tables, band=band, cell_text=cell_text, cell_class=cell_class,
-        render_rows=render_rows,
-        max_breaks=book.max_breaks, max_punches=book.max_punches,
-        query=request.query_string.decode(),
+        "report.html",
+        **_shell(kind, day, groups, employees,
+                 tables=tables, band=band, cell_text=cell_text, cell_class=cell_class,
+                 render_rows=render_rows,
+                 max_breaks=book.max_breaks, max_punches=book.max_punches,
+                 shift=config.shift, query=request.query_string.decode()),
     )
 
 

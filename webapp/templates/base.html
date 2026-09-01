@@ -8,25 +8,56 @@
 </head>
 <body>
 <header class="bar">
-  <div class="brand">Attendance Reports</div>
-  <div class="tag">unlimited in/out</div>
+  <span class="brand">Attendance</span>
+  <span class="tag">unlimited in/out</span>
+  <span class="spacer"></span>
+  <button type="button" class="iconbtn" id="theme" title="Switch light / dark" aria-label="Switch light or dark theme">&#9681;</button>
 </header>
+
 <main>
-<form class="controls" method="get" action="/">
-  <label>Report
-    <select name="report">
+<form class="controls" method="get" action="/" id="controls">
+  <div class="field">
+    <label for="report">Report</label>
+    <select name="report" id="report">
       {% for key, label in reports.items() %}
       <option value="{{ key }}" {% if key == kind %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
-  </label>
-  <label>Date <input type="date" name="date" value="{{ day.isoformat() }}" required></label>
-  <label>Employees <input type="text" name="employee" value="{{ employees }}" placeholder="all"></label>
-  <label>Groups <input type="number" name="groups" value="{{ groups }}" min="0" max="30" placeholder="auto"></label>
-  <button type="submit">Generate</button>
+  </div>
+
+  <div class="field">
+    <label for="date">Date</label>
+    <div class="stepper">
+      <a href="/?report={{ kind }}&date={{ prev_day.isoformat() }}{% if groups %}&groups={{ groups }}{% endif %}"
+         title="Previous" aria-label="Previous period">&#8249;</a>
+      <input type="date" name="date" id="date" value="{{ day.isoformat() }}" required>
+      <a href="/?report={{ kind }}&date={{ next_day.isoformat() }}{% if groups %}&groups={{ groups }}{% endif %}"
+         title="Next" aria-label="Next period">&#8250;</a>
+    </div>
+  </div>
+
+  <div class="field grow">
+    <label for="employee">Employee codes <span style="text-transform:none;letter-spacing:0">(comma separated, blank = all)</span></label>
+    <input type="text" name="employee" id="employee" value="{{ employees }}" placeholder="all employees">
+  </div>
+
+  <div class="field narrow">
+    <label for="groups">Groups</label>
+    <input type="number" name="groups" id="groups" value="{{ groups }}" min="0" max="30" placeholder="auto"
+           title="Blank sizes the layout to the data. Set 5 to match the old sheet.">
+  </div>
+
+  <button type="submit" class="btn">Generate</button>
 </form>
-{% if error %}<div class="error"><strong>Could not build the report.</strong><br>{{ error }}</div>{% endif %}
+
+{% if error %}
+<div class="notice bad" role="alert">
+  <strong>Could not build the report.</strong>{{ error }}
+</div>
+{% endif %}
+
 {% block body %}{% endblock %}
 </main>
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </body>
 </html>
