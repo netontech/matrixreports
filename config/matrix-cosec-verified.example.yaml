@@ -71,7 +71,7 @@ shift:
   end: "19:00"
 
 pairing:
-  duplicate_window_seconds: 60
+  dedup_seconds: 60
   # Sites with separate entry and exit readers can double-fire across two
   # different readers a few seconds apart; widen this if Data Issues shows a
   # lot of CONSECUTIVE_IN / CONSECUTIVE_OUT.
