@@ -260,3 +260,12 @@ def test_weekly_spans_several_weeks_for_comparison(client):
     weeks = re.findall(r">Week (\d+)</th>", band.group(1))
     assert len(weeks) > 1, "weekly should put several weeks across the page"
     assert [int(w) for w in weeks] == sorted(int(w) for w in weeks)
+
+
+def test_a_repeated_band_is_merged_not_repeated(client):
+    """Twelve months in one year is one '2026' heading, not twelve of them."""
+    html = client.get("/?report=yearly&date=2026-06-01").get_data(as_text=True)
+    band = re.search(r'<tr class="groupband">(.*?)</tr>', html, re.S)
+    if band:
+        years = re.findall(r">(\d{4})</th>", band.group(1))
+        assert len(years) <= 1, f"year heading repeated {len(years)} times"

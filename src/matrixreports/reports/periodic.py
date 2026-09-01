@@ -133,10 +133,19 @@ def build_grid_report(
     group_spans: list[tuple[str, int]] = []
     if any(period.band for period in periods):
         group_spans.append(("", leading))
+        # Merge runs of the same band. Months in one year would otherwise
+        # repeat "2026" twelve times, which is noise; merged, it reads as one
+        # year heading, and a range crossing years still splits where it should.
         for period in periods:
-            group_spans.append((period.band, 1))
+            if group_spans and group_spans[-1][0] == period.band and period.band:
+                label, span = group_spans[-1]
+                group_spans[-1] = (label, span + 1)
+            else:
+                group_spans.append((period.band, 1))
         if trailing:
             group_spans.append(("", trailing))
+    if len(group_spans) == 2:
+        group_spans = []          # a single band over everything says nothing
 
     table = ReportTable(
         key=key,
