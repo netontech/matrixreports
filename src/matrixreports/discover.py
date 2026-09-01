@@ -6,9 +6,9 @@ catalogue, scores every table for how well it fits each role, and writes a draft
 config.  The operator then runs ``check`` to confirm it before trusting a report.
 
 It also looks for the table that causes the problem in the first place: a
-pre-flattened daily summary with ``IN1, OUT1, IN2, OUT2 ...`` columns can only
-hold as many punches as it has column pairs, which is where a six-in/out ceiling
-comes from.  Those tables are reported as a warning, never selected as a source.
+pre-flattened daily summary with ``IN1, OUT1, IN2, OUT2 ...`` columns -- or, as
+Matrix actually names them, ``Punch1 ... Punch12`` -- can only hold as many
+punches as it has slot columns, which is where a six-in/out ceiling comes from.  Those tables are reported as a warning, never selected as a source.
 """
 
 from __future__ import annotations
@@ -24,8 +24,11 @@ TIME_TYPES = {"time", "time without time zone"}
 NUMERIC_TYPES = {"int", "integer", "bigint", "smallint", "tinyint", "numeric",
                  "decimal", "float", "real", "bit", "double", "money"}
 
-# Columns like IN1/OUT1/IN2 mark a pre-flattened summary: its width is the cap.
-FLATTENED_RE = re.compile(r"^(IN|OUT|I|O)_?(\d{1,2})$", re.IGNORECASE)
+# Columns like IN1/OUT1/IN2 -- or Matrix's own Punch1..Punch12 -- mark a
+# pre-flattened summary: its width is the cap.  Real COSEC installations number
+# the slots rather than naming them by direction, so both spellings must match
+# or the warning silently never fires on the very schema it exists for.
+FLATTENED_RE = re.compile(r"^(IN|OUT|I|O|PUNCH)_?(\d{1,2})$", re.IGNORECASE)
 
 EMPLOYEE_ID_HINTS = ["EMPLOYEEID", "EMPID", "EMP_ID", "EMPCODE", "EMP_CODE",
                      "USERID", "USER_ID", "PERSONID", "STAFFID", "CARDHOLDERID",
@@ -300,7 +303,7 @@ def score_punch_table(table: TableInfo, employee_columns: set[str]) -> Candidate
         # Exactly the shape that caps a report. Push it below every raw log.
         score -= 200
         reasons.append(
-            f"REJECTED: {slots} fixed IN/OUT slot columns — this is a "
+            f"REJECTED: {slots} fixed punch slot columns — this is a "
             "pre-flattened summary, not the raw log"
         )
 
@@ -343,7 +346,7 @@ def score_employee_table(table: TableInfo) -> Candidate | None:
 
     if table.flattened_slots >= 2:
         score -= 200
-        reasons.append("REJECTED: fixed IN/OUT slot columns")
+        reasons.append("REJECTED: fixed punch slot columns")
     if table.row_count is not None and 0 < table.row_count < 20_000:
         score += 10
         reasons.append(f"{table.row_count:,} rows")
@@ -473,7 +476,7 @@ def render_config(result: Discovery, *, database: dict | None = None) -> str:
 
     if result.flattened:
         lines.append("# WARNING - pre-flattened summary tables found. Each can hold")
-        lines.append("# only as many punches as it has IN/OUT column pairs, which is")
+        lines.append("# only as many punches as it has slot columns, which is")
         lines.append("# where a fixed in/out limit comes from. Not used as a source:")
         for table in result.flattened:
             lines.append(
@@ -611,7 +614,7 @@ def format_report(result: Discovery) -> str:
         lines.append("")
         lines.append("Pre-flattened summary tables (a fixed in/out limit lives here):")
         for table in result.flattened:
-            lines.append(f"  {table.name}: {table.flattened_slots} IN/OUT slot columns")
+            lines.append(f"  {table.name}: {table.flattened_slots} fixed punch slot columns")
     if result.direction_values:
         lines.append("")
         lines.append("Direction values sampled: "

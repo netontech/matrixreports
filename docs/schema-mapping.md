@@ -41,7 +41,9 @@ statement counts stand in for row counts — which is what distinguishes the raw
 punch log from a daily summary.
 
 The rest of this document covers doing it manually, and what to check in the
-draft.
+draft. For a mapping already confirmed against a real COSEC database — including
+the two columns `discover` reliably gets wrong — see
+[`cosec-schema-verified.md`](cosec-schema-verified.md).
 
 ## Finding the right tables in the SQL dump
 

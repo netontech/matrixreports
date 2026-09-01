@@ -42,6 +42,23 @@ CREATE TABLE mx_daily_attendance (
 """
 
 
+# The real Matrix table, which numbers its slots instead of naming them by
+# direction.  Twelve slots == 1st In + five (OUT, IN) pairs + Last Out, which is
+# exactly the six-group layout of the stock report.  The SPFID*/P*TYPE columns
+# sit alongside them and must not be counted as slots.
+MATRIX_FLATTENED = """
+CREATE TABLE mx_datdtrn (
+    UserID TEXT, PDate TEXT,
+    Punch1 TEXT, Punch2 TEXT, Punch3 TEXT, Punch4 TEXT,
+    Punch5 TEXT, Punch6 TEXT, Punch7 TEXT, Punch8 TEXT,
+    Punch9 TEXT, Punch10 TEXT, Punch11 TEXT, Punch12 TEXT,
+    SPFID1 INTEGER, SPFID2 INTEGER, SPFID12 INTEGER,
+    P1TYPE INTEGER, P1MID INTEGER, P1DID INTEGER,
+    Perstime1 REAL, DPTID1 INTEGER, RINId1 INTEGER,
+    OutPunch TEXT, WorkTime REAL);
+"""
+
+
 def test_finds_each_role_in_a_cosec_shaped_database(tmp_path):
     connection = make_db(tmp_path, COSEC_LIKE)
     result = discover(connection, "sqlite")
@@ -85,6 +102,41 @@ def test_flattened_table_alone_is_not_selected_as_the_punch_source(tmp_path):
     best = result.best("punches")
     # Either nothing is chosen, or the choice is flagged as rejected.
     assert best is None or any("REJECTED" in reason for reason in best.reasons)
+
+
+def test_matrix_punch_numbered_summary_is_detected(tmp_path):
+    """Matrix names its slots Punch1..Punch12, not IN1/OUT1.
+
+    Regression test: the slot pattern only matched direction-named columns, so
+    on a real COSEC database the pre-flattened table -- the very thing the
+    warning exists for -- was never reported.
+    """
+    connection = make_db(tmp_path, COSEC_LIKE + MATRIX_FLATTENED)
+    result = discover(connection, "sqlite")
+
+    assert [table.name for table in result.flattened] == ["mx_datdtrn"]
+    # Exactly the twelve Punch* columns; SPFID*, P1TYPE, Perstime1, DPTID1,
+    # RINId1 and OutPunch must not inflate the count.
+    assert result.flattened[0].flattened_slots == 12
+
+    assert result.best("punches").name == "mx_attendance_log"
+    assert "mx_datdtrn" in format_report(result)
+    assert "pre-flattened" in render_config(result).lower()
+
+
+def test_matrix_numbered_summary_never_wins_over_the_raw_log(tmp_path):
+    connection = make_db(tmp_path, MATRIX_FLATTENED)
+    result = discover(connection, "sqlite")
+    best = result.best("punches")
+    assert best is None or any("REJECTED" in reason for reason in best.reasons)
+
+
+def test_a_raw_punch_log_is_not_mistaken_for_a_flattened_table(tmp_path):
+    """Guard the widened pattern against false positives."""
+    connection = make_db(tmp_path, COSEC_LIKE)
+    result = discover(connection, "sqlite")
+    assert result.flattened == []
+    assert result.best("punches").name == "mx_attendance_log"
 
 
 def test_split_date_and_time_columns_are_detected(tmp_path):

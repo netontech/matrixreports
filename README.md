@@ -80,6 +80,11 @@ since reversing those turns time at work into time out.
 [`docs/schema-mapping.md`](docs/schema-mapping.md) covers mapping by hand if
 discovery cannot work something out.
 
+A mapping already verified against a real COSEC database, with the evidence
+behind it, is in [`docs/cosec-schema-verified.md`](docs/cosec-schema-verified.md)
+and `config/matrix-cosec-verified.example.yaml`. Start there if the client runs
+stock Matrix table names — but still run `check` before trusting it.
+
 ## Use
 
 Then `check`, which confirms the mapping and proves the point on real data:

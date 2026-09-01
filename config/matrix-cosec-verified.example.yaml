@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# matrixreports - mapping VERIFIED against a real Matrix COSEC database
+#
+# Unlike matrixreports.example.yaml, whose names are plausible guesses, every
+# table and column below was confirmed against a live COSEC schema (551 tables)
+# and checked by hand.  See docs/cosec-schema-verified.md for the evidence.
+#
+# Copy to config/matrixreports.yaml and fill in the connection details.
+# Credentials are deliberately left blank - do not commit real ones.
+# ---------------------------------------------------------------------------
+
+company:
+  name: ""
+  address: ""
+
+database:
+  driver: sqlserver
+  host: ""                # e.g. 192.168.1.10
+  port: 1433
+  database: COSEC
+  user: ""                # use a READ-ONLY login
+  password: ""
+  odbc_driver: "ODBC Driver 18 for SQL Server"
+  # ODBC Driver 18 defaults to encrypt=yes; on a LAN server without a trusted
+  # certificate you will need TrustServerCertificate=yes in a full dsn.
+  # dsn: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=<host>,1433;DATABASE=COSEC;UID=<user>;PWD=<password>;TrustServerCertificate=yes"
+
+# ---------------------------------------------------------------------------
+# Verified schema.
+#
+# Mx_ATDEventTrn is the RAW PUNCH LOG - one row per badge read.
+# Do NOT point this at Mx_DATDTrn: that is the pre-flattened daily summary whose
+# Punch1..Punch12 columns are the origin of the six-in/out ceiling.
+# ---------------------------------------------------------------------------
+schema:
+  employees:
+    table: Mx_UserMst
+    columns:
+      id: UserID
+      code: UserID
+      name: Name
+      department: DPTID     # numeric id; join to the department master for a label
+    # where: "dltdflg = 0"  # optional: exclude soft-deleted users
+
+  punches:
+    table: Mx_ATDEventTrn
+    columns:
+      emp_id: UserID
+      timestamp: Edatetime
+      direction: IOType
+      device: MID           # MID is the reader. DID is a door id and is constant.
+
+  # IOType 1 = entry, 0 = exit.  Confirmed three ways: punches alternate 1,0,1,0
+  # through the day; the first read of a shift is 1 and the last is 0; and the
+  # entry readers emit only 1 while the exit readers emit only 0.
+  # REVERSING THESE TURNS TIME AT WORK INTO TIME OUT - verify before trusting.
+  direction_in:  ["1"]
+  direction_out: ["0"]
+
+# ---------------------------------------------------------------------------
+# Shift.
+#
+# NOTE: a single global shift is a simplification.  Real installations run
+# several - the site this was verified against uses four, and the scheduled
+# shift per employee per day lives in Mx_DATDTrn.SchSFT with the roster in
+# Mx_ShiftSchMst / Mx_ShiftSchDet.  Late IN / Early OUT / Late OUT will be wrong
+# for anyone not on the shift set here.  See docs/cosec-schema-verified.md.
+# ---------------------------------------------------------------------------
+shift:
+  start: "10:00"
+  end: "19:00"
+
+pairing:
+  duplicate_window_seconds: 60
+  # Sites with separate entry and exit readers can double-fire across two
+  # different readers a few seconds apart; widen this if Data Issues shows a
+  # lot of CONSECUTIVE_IN / CONSECUTIVE_OUT.
+  # day_start_hour: 4   # set for shifts that cross midnight
