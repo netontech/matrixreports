@@ -100,17 +100,39 @@
   // only reload when the query string actually carries a selection.
   var clearAll = document.getElementById("clear-selections");
   if (clearAll) clearAll.addEventListener("click", function (event) {
+    // Whether the URL carries a selection decides if a reload is needed. It
+    // does NOT decide whether to clear: someone may have typed into the form
+    // without submitting, and that text has to go either way.
     var dirtyQuery = clearAll.dataset.dirty === "1";
-    if (filter && filter.value) { filter.value = ""; applyFilter(); }
+
+    ["employee", "groups"].forEach(function (id) {
+      var field = document.getElementById(id);
+      if (field) field.value = "";
+    });
+
+    if (filter) { filter.value = ""; applyFilter(); }
+
     document.querySelectorAll("thead th[aria-sort]").forEach(function (header) {
       header.removeAttribute("aria-sort");
       var arrow = header.querySelector(".arrow");
       if (arrow) arrow.textContent = "\u25BE";
     });
+    document.querySelectorAll("tbody").forEach(function (body) {
+      if (body._originalOrder) {
+        body._originalOrder.forEach(function (row) { body.appendChild(row); });
+      }
+    });
+
     if (!dirtyQuery) event.preventDefault();   // nothing in the URL to drop
   });
 
   // --- sort ----------------------------------------------------------------
+  // Keep the served order so "Clear all" can put it back. Sorting reorders the
+  // DOM in place, so without this the original sequence is gone for good.
+  document.querySelectorAll("tbody").forEach(function (body) {
+    body._originalOrder = Array.prototype.slice.call(body.querySelectorAll("tr"));
+  });
+
   // Times and durations are HH:MM, so comparing minutes keeps them in order;
   // plain lexical sort would put 9:05 after 10:00.
   function value(text) {
