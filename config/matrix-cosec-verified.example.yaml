@@ -50,11 +50,18 @@ schema:
     #
     # UserType is 'U' for every row on the verified site, so it cannot be used
     # to tell them apart, and dltdflg / LeaveDT were never populated.
-    # ATDCalcEnbl is Matrix's own "count this person's attendance" flag, and it
-    # is the right control for anyone not expected at the door: owners, senior
-    # staff and colleagues based in other countries. They have not left, so a
-    # leaving date would be wrong; they simply do not badge here, and without
-    # this they are reported absent every working day.
+    # ATDCalcEnbl is Matrix's own flag - its field dictionary (Mx_FieldMst)
+    # labels it "ATD Calc Enable", i.e. whether attendance is calculated for
+    # this person. It is the right control for anyone not expected at the door:
+    # owners, senior staff and colleagues based in other countries. They have
+    # not left, so a leaving date would be wrong; they simply do not badge
+    # here, and without this they are reported absent every working day.
+    #
+    # Confirm against your own data before relying on it. On the verified site
+    # one senior member already had it set to 0 and had 560 punches but only
+    # two daily-attendance rows, which is the behaviour the label implies -
+    # though two guest records carried the flag while still holding historical
+    # attendance rows, consistent with the flag having been set after the fact.
     where: "UserID NOT LIKE 'Guest%' AND ATDCalcEnbl = 1"
 
     # For staff who really have left, add LeaveDT once HR populates it:
