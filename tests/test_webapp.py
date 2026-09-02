@@ -282,3 +282,36 @@ def test_a_repeated_band_is_merged_not_repeated(client):
     if band:
         years = re.findall(r">(\d{4})</th>", band.group(1))
         assert len(years) <= 1, f"year heading repeated {len(years)} times"
+
+
+# --- five is a floor, not a cap --------------------------------------------
+
+def test_a_quiet_day_explains_why_it_shows_five(client):
+    """Five groups on a quiet day is indistinguishable from the old cap.
+
+    Without saying so, the tool looks exactly like the defect it exists to
+    fix, and the reader concludes it is broken.
+    """
+    html = client.get("/?report=daily&date=2026-06-02").get_data(as_text=True)
+    if "No punches found" in html:
+        pytest.skip("fixture has no data on this day")
+    assert "minimum layout, not a limit" in html
+    assert "/busiest?" in html
+
+
+def test_a_deep_day_does_not_show_that_explanation(client):
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert "minimum layout, not a limit" not in html
+
+
+def test_busiest_redirects_to_the_deepest_day_of_the_month(client):
+    """The fixture's heavy day is 2026-06-01 with eleven breaks."""
+    response = client.get("/busiest?report=daily&date=2026-06-20")
+    assert response.status_code == 302
+    assert "date=2026-06-01" in response.headers["Location"]
+
+
+def test_busiest_keeps_the_employee_filter(client):
+    response = client.get("/busiest?report=daily&date=2026-06-20&employee=1")
+    assert response.status_code == 302
+    assert "employee=1" in response.headers["Location"]

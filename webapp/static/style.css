@@ -182,6 +182,8 @@ tr[hidden]{display:none}
   font-size:13.5px;border:1px solid}
 .notice strong{display:block;margin-bottom:2px}
 .notice.warn{background:var(--over-soft);border-color:var(--over-line);color:var(--over)}
+.notice.info{background:var(--brand-soft);border-color:var(--brand);color:var(--ink)}
+.notice.info a{color:var(--brand);font-weight:600;white-space:nowrap}
 .notice.bad{background:#fdecec;border-color:#e9b7b7;color:#96302f}
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]) .notice.bad{background:#2b1717;border-color:#6a3838;color:#f0b6b5}

@@ -11,6 +11,16 @@
 </div>
 {% endif %}
 
+{% if max_punches > 0 and max_breaks <= 5 %}
+<div class="notice info" role="status">
+  <strong>Five groups shown &mdash; that is the minimum layout, not a limit.</strong>
+  Nobody stepped out more than {{ max_breaks }} time{{ '' if max_breaks == 1 else 's' }}
+  on this day, so the sheet renders at the familiar width. It grows a group for
+  every extra break when a day has them.
+  <a href="/busiest?{{ query }}">Show the busiest day this month &rsaquo;</a>
+</div>
+{% endif %}
+
 <div class="summary">
   <span class="chip"><b>{{ max_breaks }}</b> breaks on the deepest day</span>
   <span class="chip"><b>{{ max_punches }}</b> punches</span>

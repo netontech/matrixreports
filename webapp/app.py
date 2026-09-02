@@ -20,7 +20,8 @@ import tempfile
 from pathlib import Path
 from datetime import date, datetime, timedelta
 
-from flask import Flask, Response, render_template, request, send_file
+from flask import (Flask, Response, redirect, render_template, request,
+                   send_file)
 
 from matrixreports.builder import AttendanceBuilder
 from matrixreports.config import Config
@@ -157,6 +158,36 @@ def index():
                  max_breaks=book.max_breaks, max_punches=book.max_punches,
                  shift=config.shift, query=request.query_string.decode()),
     )
+
+
+@app.route("/busiest")
+def busiest():
+    """Jump to the deepest day of the month containing the given date.
+
+    Five OUT/IN groups is the *minimum* layout, not a limit, so a quiet day
+    looks exactly like the old capped sheet. Most days are quiet, which means
+    hunting date by date for one that proves the point. This finds it.
+    """
+    kind, day, groups, employees = _form_args()
+    start = day.replace(day=1)
+    end = (start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    config = _config()
+    with open_source(config) as source:
+        book = AttendanceBuilder(config, source).build(
+            start, end, employee_ids=employees or None
+        )
+    best, best_breaks = None, -1
+    for candidate in book.days:
+        deepest = max((len(r.breaks) for r in book.for_day(candidate)), default=0)
+        if deepest > best_breaks:
+            best, best_breaks = candidate, deepest
+    target = (best or day).isoformat()
+    query = f"report=daily&date={target}"
+    if groups:
+        query += f"&groups={groups}"
+    if employees:
+        query += "&employee=" + ",".join(employees)
+    return redirect(f"/?{query}")
 
 
 @app.route("/download.<fmt>")
