@@ -84,17 +84,19 @@ def build_daily_report(
     )
     table.group_spans = _group_spans(groups, trailing=len(columns) - 5 - groups * 3)
 
-    present = [record for record in records if record.has_data]
-    absent = [record for record in records if not record.has_data]
-
-    serial = 0
-    for record in sorted(present, key=lambda r: r.employee.display_name.lower()):
-        serial += 1
-        table.add_row(_row(record, serial, groups, config))
-    # Absent / leave rows keep their own numbering, as in the client's sheet.
-    serial = 0
-    for record in sorted(absent, key=lambda r: r.employee.display_name.lower()):
-        serial += 1
+    # The client's sheet runs one alphabetical list and counts present and
+    # non-present staff separately, so "#" reads as "the Nth person in" and
+    # "the Nth person out". Listing all the present first and then restarting
+    # turns that convention into what looks like a numbering fault, so keep
+    # everyone in one alphabetical run, exactly as their sheet does.
+    present_serial = absent_serial = 0
+    for record in sorted(records, key=lambda r: r.employee.display_name.lower()):
+        if record.has_data:
+            present_serial += 1
+            serial = present_serial
+        else:
+            absent_serial += 1
+            serial = absent_serial
         table.add_row(_row(record, serial, groups, config))
 
     truncated = [r for r in records if r.break_count > groups]

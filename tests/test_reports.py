@@ -165,3 +165,43 @@ def test_group_band_spans_cover_every_column(book):
             assert table.columns[position - 1].header == "OUT"
             assert table.columns[position - 1].group == f"Break {label}"
         position += span
+
+
+def test_daily_rows_run_in_one_alphabetical_list(config, source):
+    """Their sheet interleaves absent staff among present ones by name.
+
+    Listing every present employee and then restarting the numbering for a
+    block of absent ones makes a deliberate convention look like a fault.
+    """
+    from datetime import date
+
+    from matrixreports.builder import AttendanceBuilder
+    from matrixreports.reports import build_daily_report
+
+    day = date(2026, 6, 1)
+    book = AttendanceBuilder(config, source).build(day, day)
+    table = build_daily_report(book, day)
+
+    names = [row[1].value for row in table.rows]
+    assert names == sorted(names, key=str.lower), "rows should be one alphabetical run"
+
+
+def test_present_and_absent_are_numbered_separately(config, source):
+    """'#' counts the Nth present and the Nth absent person, as their sheet does."""
+    from datetime import date
+
+    from matrixreports.builder import AttendanceBuilder
+    from matrixreports.reports import build_daily_report
+
+    day = date(2026, 6, 1)
+    book = AttendanceBuilder(config, source).build(day, day)
+    table = build_daily_report(book, day)
+
+    headers = [column.header for column in table.columns]
+    remarks = headers.index("Remarks")
+
+    present = [r[0].value for r in table.rows if r[remarks].value == "Present"]
+    absent = [r[0].value for r in table.rows if r[remarks].value != "Present"]
+
+    assert present == list(range(1, len(present) + 1))
+    assert absent == list(range(1, len(absent) + 1))

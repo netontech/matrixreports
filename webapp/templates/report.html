@@ -61,7 +61,7 @@
         {% for column in table.columns %}
         <th {% if loop.index <= 2 %}class="sortable pin-{{ loop.index }}"{% else %}class="sortable"{% endif %}
             data-col="{{ loop.index0 }}" tabindex="0" role="columnheader"
-            title="Sort by {{ column.header }}">{{ column.header }}<span class="arrow">&#9662;</span></th>
+            title="{% if column.header == '#' %}Present staff and absent staff are numbered separately, as in the existing sheet. Click to sort.{% else %}Sort by {{ column.header }}{% endif %}">{{ column.header }}<span class="arrow">&#9662;</span></th>
         {% endfor %}
       </tr>
     </thead>
