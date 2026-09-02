@@ -40,7 +40,17 @@ schema:
       code: UserID
       name: Name
       department: DPTID     # numeric id; join to the department master for a label
-    # where: "dltdflg = 0"  # optional: exclude soft-deleted users
+
+    # Mx_UserMst holds every badge ever issued, not just staff: visitor passes
+    # live in it too, and on the verified site they carry a Guest* code. Left
+    # in, each one appears as an employee absent every single day.
+    #
+    # Check what yours look like before copying this:
+    #   SELECT UserID, Name FROM Mx_UserMst ORDER BY UserID;
+    #
+    # UserType is 'U' for every row on the verified site, so it cannot be used
+    # to tell them apart, and dltdflg / LeaveDT were never populated.
+    where: "UserID NOT LIKE 'Guest%'"
 
   punches:
     table: Mx_ATDEventTrn
