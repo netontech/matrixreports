@@ -50,23 +50,23 @@ schema:
     #
     # UserType is 'U' for every row on the verified site, so it cannot be used
     # to tell them apart, and dltdflg / LeaveDT were never populated.
-    where: "UserID NOT LIKE 'Guest%'"
+    # ATDCalcEnbl is Matrix's own "count this person's attendance" flag, and it
+    # is the right control for anyone not expected at the door: owners, senior
+    # staff and colleagues based in other countries. They have not left, so a
+    # leaving date would be wrong; they simply do not badge here, and without
+    # this they are reported absent every working day.
+    where: "UserID NOT LIKE 'Guest%' AND ATDCalcEnbl = 1"
 
-    # Once HR populates LeaveDT for departed staff, widen this to drop them too:
+    # For staff who really have left, add LeaveDT once HR populates it:
     #
-    #   where: "UserID NOT LIKE 'Guest%' AND LeaveDT IS NULL"
+    #   where: "UserID NOT LIKE 'Guest%' AND ATDCalcEnbl = 1 AND LeaveDT IS NULL"
     #
-    # Until then leavers appear as absent every day, because on the verified
-    # site LeaveDT was empty for all sixty records - the database genuinely
-    # cannot say who still works there.
-    #
-    # Note the trade-off: this filter is static, so it means "current staff".
-    # A report re-run for an earlier period will omit anyone who has since
-    # left, even though they were employed at the time. That is the right
-    # default for operational reporting; for historical accuracy you would
-    # need the leaving date compared against the report period, which the
-    # employees query cannot do (unlike punches, it receives no date
-    # parameters).
+    # On the verified site LeaveDT was empty for all sixty records, so the
+    # database could not say who still worked there. Note the trade-off: the
+    # filter is static, so it means "current staff" - re-running an earlier
+    # period would omit anyone who has left since, though they were employed
+    # at the time. The employees query receives no date parameters (unlike
+    # punches), so it cannot compare against the report period.
 
   punches:
     table: Mx_ATDEventTrn
