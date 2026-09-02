@@ -52,6 +52,22 @@ schema:
     # to tell them apart, and dltdflg / LeaveDT were never populated.
     where: "UserID NOT LIKE 'Guest%'"
 
+    # Once HR populates LeaveDT for departed staff, widen this to drop them too:
+    #
+    #   where: "UserID NOT LIKE 'Guest%' AND LeaveDT IS NULL"
+    #
+    # Until then leavers appear as absent every day, because on the verified
+    # site LeaveDT was empty for all sixty records - the database genuinely
+    # cannot say who still works there.
+    #
+    # Note the trade-off: this filter is static, so it means "current staff".
+    # A report re-run for an earlier period will omit anyone who has since
+    # left, even though they were employed at the time. That is the right
+    # default for operational reporting; for historical accuracy you would
+    # need the leaving date compared against the report period, which the
+    # employees query cannot do (unlike punches, it receives no date
+    # parameters).
+
   punches:
     table: Mx_ATDEventTrn
     columns:
