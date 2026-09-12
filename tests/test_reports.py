@@ -30,8 +30,15 @@ def test_book_reports_the_deepest_day(book):
 def test_daily_report_grows_past_the_six_group_limit(book, config):
     table = build_daily_report(book, DAY)
     assert table.meta["groups"] == 11
-    # 5 leading columns + 11 groups x 3 + 9 trailing + 2 diagnostic columns.
-    assert len(table.columns) == 5 + 11 * 3 + 9 + 2
+
+    # Assert the shape, not a total: counting trailing columns by hand means
+    # the test fails whenever a summary column is added, which says nothing
+    # about whether the groups grew.
+    headers = [column.header for column in table.columns]
+    assert headers[:5] == ["#", "Employee Name", "Department", "1st In", "Last Out"]
+    assert headers.count("OUT") == 11 and headers.count("IN") == 11
+    assert headers.count("MINS") == 11
+    assert headers[5:5 + 33] == ["OUT", "IN", "MINS"] * 11
     headers = [column.header for column in table.columns]
     assert headers.count("MINS") == 11
     for row in table.rows:

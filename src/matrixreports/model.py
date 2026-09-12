@@ -152,6 +152,20 @@ class DayRecord:
         return delta if delta > ZERO else ZERO
 
     @property
+    def early_in(self) -> timedelta | None:
+        """How early the first punch was against the shift start.
+
+        The mirror of ``late_in``: one of the two is always zero. Their sheet
+        tracks it as its own block ("EARLY IN (BEFORE 10:00)"), because arriving
+        before the shift is a thing to notice, not merely the absence of being
+        late.
+        """
+        if self.first_in is None or self.shift_start is None:
+            return None
+        delta = self.shift_start - self.first_in
+        return delta if delta > ZERO else ZERO
+
+    @property
     def early_out(self) -> timedelta | None:
         """How early the last punch was against the shift end."""
         if self.last_out is None or self.shift_end is None:

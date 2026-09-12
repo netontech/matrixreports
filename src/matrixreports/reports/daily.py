@@ -65,6 +65,7 @@ def build_daily_report(
         Column("Total Out Time", "duration", 11.0),
         Column("Actual Works Hours", "duration", 12.0),
         Column("Wrk Hrs + Out Time", "duration", 12.0),
+        Column("Early IN", "duration", 9.0),
         Column("Late IN", "duration", 9.0),
         Column("Early OUT", "duration", 9.5),
         Column("Late OUT", "duration", 9.5),
@@ -82,7 +83,11 @@ def build_daily_report(
         columns=columns,
         meta={"day": day, "groups": groups},
     )
-    table.group_spans = _group_spans(groups, trailing=len(columns) - 5 - groups * 3)
+    # With no groups there is nothing to band, and an all-blank row above the
+    # headers just adds a rule the reader has to look past.
+    table.group_spans = (
+        _group_spans(groups, trailing=len(columns) - 5 - groups * 3) if groups else []
+    )
 
     # The client's sheet runs one alphabetical list and counts present and
     # non-present staff separately, so "#" reads as "the Nth person in" and
@@ -151,6 +156,7 @@ def _row(record: DayRecord, serial: int, groups: int, config: Config) -> list[Ce
         duration(record.break_total),
         duration(record.worked),
         duration(record.span),
+        duration(record.early_in),
         duration(record.late_in),
         duration(record.early_out),
         duration(record.late_out),

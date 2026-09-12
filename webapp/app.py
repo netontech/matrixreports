@@ -43,11 +43,22 @@ app = Flask(__name__)
 app.config["MATRIX_CONFIG"] = os.environ.get("MATRIXREPORTS_CONFIG", "config/matrixreports.yaml")
 app.before_request(require_login)
 
+# Exception columns worth catching the eye when they carry a value. Arriving
+# early and leaving late are not faults, so they read differently from being
+# late in or out early.
+HIGHLIGHT = {
+    "Early IN": "good",
+    "Late OUT": "good",
+    "Late IN": "bad",
+    "Early OUT": "bad",
+}
+
 # How many weeks the weekly report spans, ending on the selected week.
 WEEKLY_WEEKS = 13
 
 REPORTS = {
     "daily": "Daily attendance",
+    "totals": "Daily totals (no in/out detail)",
     "summary": "Daily exception summary",
     "weekly": "Weekly totals",
     "monthly": "Monthly attendance",
@@ -60,7 +71,7 @@ def _config() -> Config:
 
 
 def _range(kind: str, day: date) -> tuple[date, date]:
-    if kind in {"daily", "summary"}:
+    if kind in {"daily", "summary", "totals"}:
         return day, day
     if kind == "weekly":
         # Their weekly sheet puts many weeks across the page so the trend is
@@ -89,6 +100,10 @@ def _build(kind: str, day: date, groups: int | None, employees: list[str]):
         )
     if kind == "daily":
         tables = [build_daily_report(book, start)]
+    elif kind == "totals":
+        # The same day records, without the OUT/IN/MINS groups: arrival,
+        # departure, how long out, hours worked, and the shift exceptions.
+        tables = [build_daily_report(book, start, groups=0)]
     elif kind == "summary":
         tables = build_summary_report(book, start)
     elif kind == "weekly":
@@ -119,7 +134,7 @@ def _form_args():
 
 def _step(kind: str, day: date, delta: int) -> date:
     """Previous/next in the units the chosen report actually moves in."""
-    if kind in {"daily", "summary"}:
+    if kind in {"daily", "summary", "totals"}:
         return day + timedelta(days=delta)
     if kind == "weekly":
         return day + timedelta(weeks=delta)
@@ -156,7 +171,8 @@ def index():
                  tables=tables, band=band, cell_text=cell_text, cell_class=cell_class,
                  render_rows=render_rows,
                  max_breaks=book.max_breaks, max_punches=book.max_punches,
-                 shift=config.shift, query=request.query_string.decode()),
+                 shift=config.shift, HIGHLIGHT=HIGHLIGHT,
+                 query=request.query_string.decode()),
     )
 
 

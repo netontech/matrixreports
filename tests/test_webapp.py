@@ -315,3 +315,37 @@ def test_busiest_keeps_the_employee_filter(client):
     response = client.get("/busiest?report=daily&date=2026-06-20&employee=1")
     assert response.status_code == 302
     assert "employee=1" in response.headers["Location"]
+
+
+# --- early in, and the condensed report ------------------------------------
+
+def test_daily_report_has_an_early_in_column(client):
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert "<th[^>]*>Early IN<" or "Early IN" in html
+    assert re.search(r"<th[^>]*>Early IN<", html)
+
+
+def test_exception_values_are_highlighted_but_zeroes_are_not(client):
+    """A column of highlighted 00:00 would highlight nothing."""
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    flagged = re.findall(r'<td class="[^"]*flag-(good|bad)[^"]*"[^>]*>([^<]*)</td>', html)
+    assert flagged, "expected some exception values to be flagged"
+    assert all(value.strip() not in ("", "00:00") for _, value in flagged)
+
+
+def test_totals_report_drops_the_in_out_detail(client):
+    html = client.get("/?report=totals&date=2026-06-01").get_data(as_text=True)
+    assert re.search(r"<th[^>]*>MINS<", html) is None, "totals should carry no break groups"
+    for header in ("1st In", "Last Out", "No. Of OUT", "Actual Works Hours"):
+        assert re.search(rf"<th[^>]*>{re.escape(header)}<", html), f"missing {header}"
+
+
+def test_totals_report_has_no_empty_band_row(client):
+    """With no groups there is nothing to band."""
+    html = client.get("/?report=totals&date=2026-06-01").get_data(as_text=True)
+    assert '<tr class="groupband">' not in html
+
+
+def test_totals_report_is_offered_in_the_picker(client):
+    html = client.get("/?report=daily&date=2026-06-01").get_data(as_text=True)
+    assert 'value="totals"' in html

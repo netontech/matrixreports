@@ -76,7 +76,8 @@
       <tr class="{{ rowclass }}{% if outs.n is number and outs.n > 5 %} over{% endif %}"
           {% if outs.n is number and outs.n > 5 %}title="{{ outs.n }} breaks - the stock report can show five"{% endif %}>
         {% for cell in row %}
-        <td class="{{ cell_class(cell) }}{% if loop.index <= 2 %} pin-{{ loop.index }}{% endif %}"
+        {% set header = table.columns[loop.index0].header %}
+        <td class="{{ cell_class(cell) }}{% if loop.index <= 2 %} pin-{{ loop.index }}{% endif %}{% if header in HIGHLIGHT and cell_text(cell) not in ('', '00:00') %} flag-{{ HIGHLIGHT[header] }}{% endif %}"
             {% if cell.note %}title="{{ cell.note }}"{% endif %}>{{ cell_text(cell) }}</td>
         {% endfor %}
       </tr>
