@@ -1,0 +1,374 @@
+<title>The Five-Break Ceiling</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#f7f8fa; --card:#ffffff; --ink:#16202c; --muted:#5d6a7d;
+  --rule:#ccd5df; --rule-soft:#e3e9ef;
+  --within:#4079B4; --beyond:#C07C22;
+  --beyond-wash:#faf1e2; --within-wash:#eaf1f8;
+  --shadow:0 1px 2px rgba(22,32,44,.06),0 8px 24px rgba(22,32,44,.05);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#141a20; --card:#1b232b; --ink:#e4eaf1; --muted:#93a1b3;
+    --rule:#2b3742; --rule-soft:#232d37;
+    --beyond-wash:#2c2317; --within-wash:#18242f;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#141a20; --card:#1b232b; --ink:#e4eaf1; --muted:#93a1b3;
+  --rule:#2b3742; --rule-soft:#232d37;
+  --beyond-wash:#2c2317; --within-wash:#18242f;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+  font-size:17px;line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.col{max-width:66ch;margin-inline:auto}
+
+h1,h2,h3,.label,.stat-n,.tag{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+h1{font-size:clamp(2.1rem,5vw,3.1rem);line-height:1.08;font-weight:700;
+   letter-spacing:-.02em;margin:0 0 .5rem;text-wrap:balance}
+h2{font-size:1.5rem;font-weight:650;letter-spacing:-.01em;margin:0 0 .6rem;text-wrap:balance}
+h3{font-size:1.02rem;font-weight:600;margin:0 0 .35rem}
+p{margin:0 0 1.05rem}
+strong{font-weight:600}
+.label{font-size:.72rem;font-weight:600;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+
+/* ---- masthead: a ledger rule under the title, as the sheet itself has ---- */
+header{padding:72px 0 34px;border-bottom:2px solid var(--ink)}
+header .kicker{margin-bottom:14px}
+.lede{font-size:1.2rem;color:var(--muted);margin:0;max-width:60ch}
+.byline{margin-top:26px;padding-top:14px;border-top:1px solid var(--rule-soft);
+  display:flex;flex-wrap:wrap;gap:8px 22px;font-size:.82rem;color:var(--muted)}
+
+section{padding:52px 0;border-bottom:1px solid var(--rule-soft)}
+section:last-of-type{border-bottom:0}
+
+/* ---- headline figure ---- */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;
+  background:var(--rule-soft);border:1px solid var(--rule-soft);margin:30px 0 0}
+.stat{background:var(--card);padding:20px 22px}
+.stat-n{font-size:2.3rem;font-weight:700;line-height:1;letter-spacing:-.03em;
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.stat-n.warn{color:var(--beyond)}
+.stat p{margin:.45rem 0 0;font-size:.87rem;color:var(--muted);line-height:1.45}
+
+/* ---- chart ---- */
+figure{margin:0}
+.fig{background:var(--card);border:1px solid var(--rule-soft);box-shadow:var(--shadow);
+  padding:26px 26px 20px;margin-top:26px}
+.figtop{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;
+  justify-content:space-between;margin-bottom:22px}
+.legend{display:flex;gap:16px;font-size:.78rem;color:var(--muted);
+  font-family:Archivo,sans-serif}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;
+  margin-right:6px;vertical-align:-1px}
+.chart{display:grid;grid-template-columns:repeat(13,1fr);gap:8px;align-items:end;
+  height:230px;padding-bottom:2px}
+.bar{position:relative;display:flex;flex-direction:column;justify-content:flex-end;
+  height:100%;cursor:default}
+.bar .fill{border-radius:4px 4px 0 0;background:var(--within);min-height:3px;
+  transition:filter .12s}
+.bar.over .fill{background:var(--beyond)}
+.bar:hover .fill{filter:brightness(1.12)}
+.bar .val{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:.7rem;color:var(--muted);text-align:center;margin-bottom:5px}
+.bar:hover .val{color:var(--ink)}
+.xaxis{display:grid;grid-template-columns:repeat(13,1fr);gap:8px;
+  border-top:1px solid var(--rule);padding-top:7px;margin-top:0}
+.xaxis span{text-align:center;font-family:"IBM Plex Mono",monospace;
+  font-size:.75rem;color:var(--muted)}
+.xaxis span.over{color:var(--beyond);font-weight:500}
+.axlabel{font-size:.75rem;color:var(--muted);text-align:center;margin-top:9px;
+  font-family:Archivo,sans-serif;letter-spacing:.03em}
+.tip{position:absolute;bottom:100%;left:50%;transform:translate(-50%,-8px);
+  background:var(--ink);color:var(--paper);font-family:Archivo,sans-serif;
+  font-size:.74rem;line-height:1.35;padding:6px 9px;border-radius:4px;
+  white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s;z-index:5}
+.bar:hover .tip,.bar:focus-visible .tip{opacity:1}
+figcaption{font-size:.83rem;color:var(--muted);margin-top:16px;
+  padding-top:13px;border-top:1px solid var(--rule-soft)}
+
+/* ---- the twelve slots ---- */
+.slots{display:grid;grid-template-columns:repeat(13,minmax(0,1fr));gap:5px;margin:8px 0 6px}
+.slot{border:1px solid var(--rule);background:var(--card);
+  padding:9px 6px;text-align:center;font-family:"IBM Plex Mono",monospace;font-size:.73rem}
+.slot b{display:block;font-weight:500;color:var(--ink);letter-spacing:-.01em}
+.slot span{display:block;font-size:.66rem;color:var(--muted);margin-top:3px}
+.slot.edge{background:var(--within-wash);border-color:var(--within)}
+.slot.thirteen{background:var(--beyond-wash);border-color:var(--beyond);border-style:dashed}
+.slot.thirteen b,.slot.thirteen span{color:var(--beyond)}
+.pairs{display:grid;grid-template-columns:repeat(13,minmax(0,1fr));gap:5px;
+  font-family:Archivo,sans-serif;font-size:.7rem;color:var(--muted);
+  letter-spacing:.04em;margin-top:14px}
+.pairs div{text-align:center;padding-bottom:5px}
+.pairs .pair{grid-column:span 2;border-bottom:1px solid var(--rule);
+  border-left:1px solid var(--rule);border-right:1px solid var(--rule);
+  border-radius:3px 3px 0 0;padding-bottom:4px}
+
+/* ---- ledger comparison ---- */
+.tablewrap{overflow-x:auto;border:1px solid var(--rule-soft);background:var(--card);
+  box-shadow:var(--shadow);margin-top:24px}
+table{border-collapse:collapse;width:100%;font-size:.85rem;
+  font-family:Archivo,sans-serif}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--rule-soft);
+  white-space:nowrap}
+thead th{font-size:.71rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;border-bottom:1px solid var(--rule)}
+tbody tr:last-child td{border-bottom:0}
+td.n{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+td.was{color:var(--muted)}
+td.is{color:var(--beyond);font-weight:500}
+.rowlab{color:var(--muted)}
+
+/* ---- pull quote / the mechanism ---- */
+.mech{background:var(--card);border-left:3px solid var(--within);
+  padding:20px 24px;margin:26px 0;box-shadow:var(--shadow)}
+.mech .formula{font-family:"IBM Plex Mono",monospace;font-size:.9rem;
+  color:var(--ink);margin:0 0 .7rem;line-height:1.5}
+.mech p{margin:0;font-size:.95rem;color:var(--muted)}
+
+.note{background:var(--beyond-wash);border-left:3px solid var(--beyond);
+  padding:18px 22px;margin:26px 0}
+.note h3{color:var(--beyond)}
+.note p:last-child{margin-bottom:0}
+
+footer{padding:44px 0 72px;color:var(--muted);font-size:.85rem}
+footer p{margin:0 0 .5rem}
+
+:focus-visible{outline:2px solid var(--within);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:640px){
+  .chart{height:170px;gap:4px}.xaxis{gap:4px}
+  .chart,.xaxis{grid-template-columns:repeat(13,1fr)}
+  .bar .val{font-size:.6rem}.xaxis span{font-size:.65rem}
+  header{padding:48px 0 26px}
+}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="label kicker">Attendance reporting &middot; findings</div>
+  <h1>The report can show five breaks. The doors recorded twelve.</h1>
+  <p class="lede">The attendance data is complete. The sheet that reads it is not
+     &mdash; and because hours worked are calculated from what the sheet can show, every
+     break it cannot fit is silently paid as time at work.</p>
+  <div class="byline">
+    <span><strong>Source</strong> Matrix COSEC, 119,800 punch records</span>
+    <span><strong>Period</strong> 12,261 attendance days</span>
+    <span><strong>Method</strong> raw punches re-paired in code</span>
+  </div>
+</header>
+
+<section>
+  <div class="col">
+    <h2>The shape of the evidence</h2>
+    <p>Start with the existing sheet for a single day. Of 37 staff, the number
+       recorded as stepping out looks like this: six at zero, one at one, one at
+       two, seven at three, five at four &mdash; and then <strong>seventeen at exactly
+       five</strong>, with nothing above it.</p>
+    <p>That is not how people behave. A real distribution of how often someone
+       leaves the floor tapers off at the top. This one falls to five at four
+       breaks, then more than triples at five and stops dead. A distribution that
+       rises into its maximum and terminates there is not observed data &mdash; it is
+       <strong>censored</strong> data, and the maximum is the censor.</p>
+  </div>
+
+  <div class="stats col">
+    <div class="stat"><div class="stat-n">17<span style="font-size:1.1rem;color:var(--muted)">/37</span></div>
+      <p>staff pinned at exactly five breaks on the sampled day</p></div>
+    <div class="stat"><div class="stat-n warn">1,661</div>
+      <p>attendance days that exceed five breaks and cannot be shown</p></div>
+    <div class="stat"><div class="stat-n warn">13.5%</div>
+      <p>of all attendance days affected</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2>What the punches actually show</h2>
+    <p>Re-paired from the raw door records, with no limit on how many times a
+       person may step out, the true distribution appears &mdash; and it behaves
+       properly, peaking at four and tapering away.</p>
+  </div>
+
+  <figure class="fig">
+    <div class="figtop">
+      <div>
+        <div class="label">Attendance days by number of breaks</div>
+        <div style="font-size:.8rem;color:var(--muted)">12,261 employee-days</div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--within)"></i>Within the sheet's limit</span>
+        <span><i style="background:var(--beyond)"></i>Beyond it &mdash; dropped</span>
+      </div>
+    </div>
+    <div class="chart" id="chart"></div>
+    <div class="xaxis" id="xaxis"></div>
+    <div class="axlabel">Breaks taken in one day</div>
+    <figcaption>Everything from six rightward &mdash; <strong>1,661 days</strong> &mdash; exists
+      in the database and is absent from the report. The deepest day recorded
+      twelve breaks, twenty-four punches.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="col">
+    <h2>Why five, exactly</h2>
+    <p>The limit is not a policy or a setting. It is the width of a table. The
+       daily summary the report reads stores a day as twelve fixed columns,
+       <span class="mono">Punch1</span> through <span class="mono">Punch12</span>,
+       and twelve columns hold exactly one arrival, five round trips, and one
+       departure.</p>
+  </div>
+
+  <div class="fig">
+    <div class="label" style="margin-bottom:4px">One row of the daily summary table</div>
+    <div class="pairs">
+      <div>arrive</div>
+      <div class="pair">break 1</div><div class="pair">break 2</div>
+      <div class="pair">break 3</div><div class="pair">break 4</div>
+      <div class="pair">break 5</div>
+      <div>leave</div><div></div>
+    </div>
+    <div class="slots">
+      <div class="slot edge"><b>Punch1</b><span>1st In</span></div>
+      <div class="slot"><b>Punch2</b><span>out</span></div>
+      <div class="slot"><b>Punch3</b><span>in</span></div>
+      <div class="slot"><b>Punch4</b><span>out</span></div>
+      <div class="slot"><b>Punch5</b><span>in</span></div>
+      <div class="slot"><b>Punch6</b><span>out</span></div>
+      <div class="slot"><b>Punch7</b><span>in</span></div>
+      <div class="slot"><b>Punch8</b><span>out</span></div>
+      <div class="slot"><b>Punch9</b><span>in</span></div>
+      <div class="slot"><b>Punch10</b><span>out</span></div>
+      <div class="slot"><b>Punch11</b><span>in</span></div>
+      <div class="slot edge"><b>Punch12</b><span>Last Out</span></div>
+      <div class="slot thirteen"><b>&mdash;</b><span>no 13th</span></div>
+    </div>
+    <figcaption>A sixth step-out needs a thirteenth and fourteenth column. There
+      are none, so the punches are dropped on the way to the sheet &mdash; not lost from
+      the database, which is why the data looks complete when it is checked
+      directly.</figcaption>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2>Why it overstates hours</h2>
+    <p>A missing column would be a cosmetic problem. This one is arithmetic. On
+       every row of the existing sheet, <em>Total Out Minutes</em> is the sum of
+       the break cells it managed to display, and hours worked is derived from
+       it:</p>
+
+    <div class="mech">
+      <p class="formula">Actual Works Hours&nbsp;=&nbsp;(Last Out&nbsp;&minus;&nbsp;1st In)&nbsp;&minus;&nbsp;Total Out Minutes</p>
+      <p>A sixth break never enters <em>Total Out Minutes</em>, so it is never
+         subtracted. The overstatement is not a side effect of the limit &mdash; it
+         follows from it by arithmetic.</p>
+    </div>
+
+    <p>On the sampled day, nine of thirty-five staff had taken more breaks than
+       the sheet could hold. For one of them the gap is not marginal:</p>
+  </div>
+
+  <div class="tablewrap col">
+    <table>
+      <caption class="label" style="text-align:left;padding:14px 14px 0">One employee, one day</caption>
+      <thead><tr><th>Measure</th><th style="text-align:right">Existing report</th><th style="text-align:right">From the punches</th></tr></thead>
+      <tbody>
+        <tr><td class="rowlab">Breaks recorded</td><td class="n was">5</td><td class="n is">6</td></tr>
+        <tr><td class="rowlab">Time out of the building</td><td class="n was">6:39</td><td class="n is">8:36</td></tr>
+        <tr><td class="rowlab">Longest single break</td><td class="n was">not shown</td><td class="n is">2:49</td></tr>
+        <tr><td class="rowlab">Hours credited as worked</td><td class="n was">7:26</td><td class="n is">3:29</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p style="margin-top:22px">Two breaks &mdash; one of two hours forty-nine minutes,
+       one of two hours &mdash; fell past the fifth slot. Neither was subtracted. The
+       day was paid as if <strong>nearly four hours</strong> of absence were time
+       at work.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2>A second, unrelated error</h2>
+    <div class="note">
+      <h3>Durations are stored as <span class="mono">hh.mm</span> and then added up</h3>
+      <p>Throughout the weekly and monthly sheets a duration is written as a
+         number whose whole part is hours and whose decimal part is minutes &mdash;
+         <span class="mono">8.14</span> meaning eight hours fourteen minutes &mdash; and
+         those numbers are then summed. The decimal part counts to a hundred while
+         minutes count to sixty, so every total is wrong, and the error compounds
+         with each cell added.</p>
+      <p>It also corrupts single days. One employee's break time reads
+         <span class="mono">1.04</span> &mdash; one hour four minutes. The report
+         deducted <strong>four minutes</strong>. A full hour was credited as work,
+         on a day that was never truncated at all.</p>
+    </div>
+    <p>This is worth separating from the ceiling: fixing the column limit does not
+       fix this, and fixing this does not fix the ceiling. They are two defects
+       that happen to push the same direction.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2>What changes</h2>
+    <p>The punches are read directly and paired in code, where nothing is fixed at
+       twelve. A day with twenty-four punches produces twelve sessions and eleven
+       breaks, and the sheet grows an <span class="mono">OUT / IN / MINS</span>
+       group for each one. A quiet day still renders at the familiar five, so the
+       report looks like the one people already read.</p>
+    <p>Arrival and departure times are unchanged &mdash; they matched the existing
+       report on thirty-four of thirty-five staff, and the two that differed were
+       both errors in the old sheet: one took an <em>exit</em> swipe as the day's
+       first arrival, the other treated an unclosed entry as a departure. Both are
+       now flagged rather than quietly assumed.</p>
+    <p>Durations are kept as real time values and displayed as
+       <span class="mono">HH:MM</span>, so they add up correctly in the sheet and
+       do not wrap at twenty-four hours.</p>
+  </div>
+</section>
+
+<footer class="col">
+  <p>Figures are aggregates drawn from the attendance database and the existing
+     workbooks. No individual is named.</p>
+</footer>
+</div>
+
+<script>
+const DATA=[[0,1064],[1,1118],[2,1685],[3,2329],[4,2549],[5,1855],[6,1041],[7,417],[8,131],[9,53],[10,12],[11,4],[12,3]];
+const LIMIT=5, max=Math.max(...DATA.map(d=>d[1]));
+const chart=document.getElementById('chart'), axis=document.getElementById('xaxis');
+const total=DATA.reduce((s,d)=>s+d[1],0);
+for(const [breaks,days] of DATA){
+  const over=breaks>LIMIT;
+  const bar=document.createElement('div');
+  bar.className='bar'+(over?' over':'');
+  bar.tabIndex=0;
+  bar.setAttribute('role','img');
+  bar.setAttribute('aria-label',
+    `${breaks} breaks: ${days.toLocaleString()} days${over?', beyond what the report can show':''}`);
+  const pct=(days/total*100).toFixed(1);
+  bar.innerHTML=
+    `<div class="tip">${days.toLocaleString()} days &middot; ${pct}%${over?' &middot; dropped':''}</div>`+
+    `<div class="val">${days.toLocaleString()}</div>`+
+    `<div class="fill" style="height:${Math.max(days/max*100,1.2)}%"></div>`;
+  chart.appendChild(bar);
+  const tick=document.createElement('span');
+  tick.textContent=breaks; if(over) tick.className='over';
+  axis.appendChild(tick);
+}
+</script>
