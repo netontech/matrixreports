@@ -9,8 +9,9 @@ you must not skip.
 
 `docs/running-on-premise.md` covers the CLI-only Windows case. This one covers
 an **Ubuntu Desktop** VM running the web portal against the live Matrix
-database. Desktop rather than Server, because AnyDesk needs a graphical
-session.
+database, on **Ubuntu Desktop 24.04.4 LTS** — Desktop rather than Server
+because AnyDesk needs a graphical session, and 24.04.4 because that is the
+build AnyDesk is known to work on here.
 
 ---
 
@@ -21,7 +22,7 @@ what turns a 90-minute job into a two-day one.
 
 | What | Why | Check it yourself |
 | --- | --- | --- |
-| **Ubuntu Desktop** 22.04 or 24.04 | AnyDesk needs a graphical session; the Server image has none | `lsb_release -a` |
+| **Ubuntu Desktop 24.04.4 LTS** | AnyDesk needs a graphical session, and this is the build it is known to work on | `lsb_release -d` |
 | 2 vCPU / **8 GB** / 20 GB | GNOME takes ~1.5 GB before we start. 4 GB works but leaves little headroom | `free -m`, `df -h /` |
 | `sudo` on the VM | Every install step needs it | `sudo -v` |
 | Network route to the Matrix SQL Server on **1433** | Without it nothing else matters | step 2 |
@@ -36,74 +37,22 @@ the connection string and often a different port.
 
 ## 1. AnyDesk
 
-Do this **first**, and finish it — including the reboot test — before
-installing anything else. Everything here fails *later*, after a restart,
-when nobody is in the room.
+Do this **first** and finish it, including the reboot test, before installing
+anything else. AnyDesk itself is known to work on this build — what bites is
+the machine going to sleep or coming back with nobody logged in, and both of
+those only show up later, when you are not in the room.
 
-Confirm it really is the Desktop image:
-
-```bash
-ls /usr/share/xsessions/          # expect ubuntu.desktop / ubuntu-xorg.desktop
-systemctl get-default             # expect graphical.target
-```
-
-If that comes back empty or says `multi-user.target`, it is the Server image.
-Ask for the Desktop one. Failing that, `sudo apt install -y ubuntu-desktop`
-takes about 20 minutes and a reboot.
-
-### 1a. Switch GNOME to Xorg
-
-Ubuntu Desktop defaults to Wayland and **AnyDesk needs X11**. Skip this and
-you get a connection that shows a black screen or a frozen image.
+Confirm the build:
 
 ```bash
-sudo sed -i 's/^#\?WaylandEnable=.*/WaylandEnable=false/' /etc/gdm3/custom.conf
-grep WaylandEnable /etc/gdm3/custom.conf        # WaylandEnable=false
+lsb_release -d            # Ubuntu 24.04.4 LTS
+systemctl get-default     # graphical.target
 ```
 
-Takes effect at the next reboot (1d).
+If `get-default` says `multi-user.target` it is the Server image, not Desktop.
+Stop and ask for the Desktop one.
 
-### 1b. Stop it going to sleep
-
-A desktop image assumes someone is sitting at it, so it suspends and blanks
-the screen on idle. A suspended VM is an unreachable VM.
-
-```bash
-sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-```
-
-And in the GNOME session, as the desktop user:
-
-```bash
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
-gsettings set org.gnome.desktop.session idle-delay 0
-gsettings set org.gnome.desktop.screensaver lock-enabled false
-```
-
-The last one matters: a locked screen is exactly as useless to us as a black
-one, because AnyDesk hands you a lock screen you cannot get past without the
-desktop user's password.
-
-### 1c. Log in automatically
-
-Unattended access needs a graphical session to exist. After a reboot with no
-one logged in, there is none — only the greeter — and AnyDesk gives you very
-little.
-
-```bash
-sudo sed -i 's/^#\?  *AutomaticLoginEnable *=.*/AutomaticLoginEnable=true/; s/^#\?  *AutomaticLogin *=.*/AutomaticLogin=<desktop-user>/' /etc/gdm3/custom.conf
-grep -A2 '^\[daemon\]' /etc/gdm3/custom.conf
-```
-
-> **This is a real trade-off, so make it deliberately.** Autologin plus no
-> screen lock means anyone who can open that VM's console gets a logged-in
-> desktop on a machine that reads HR data. It is defensible for a VM inside
-> their datacentre that nobody has console access to, and it is the price of
-> unattended remote support. If their IT is not comfortable with it, the
-> alternative is that someone logs in before each support session — say so
-> rather than quietly enabling it.
-
-### 1d. Install AnyDesk and reboot
+### 1a. Install AnyDesk
 
 ```bash
 sudo apt update
@@ -114,34 +63,88 @@ echo "deb [signed-by=/usr/share/keyrings/anydesk.gpg] http://deb.anydesk.com/ al
   | sudo tee /etc/apt/sources.list.d/anydesk.list
 sudo apt update && sudo apt install -y anydesk
 sudo systemctl enable --now anydesk
-sudo reboot
 ```
 
-If the key or repo URL has moved, take them from
-<https://anydesk.com/en/downloads/linux> rather than guessing.
-
-### 1e. Set unattended access, then prove it
-
-After the reboot:
+Both URLs were checked and are live. If either has moved, take the current
+ones from <https://anydesk.com/en/downloads/linux> rather than guessing.
 
 ```bash
-echo $XDG_SESSION_TYPE               # must say x11, not wayland
-anydesk --get-id                     # note this number down
+anydesk --get-id                                   # note this number down
 sudo sh -c 'echo "<the-password>" | anydesk --set-password'
 ```
 
-**The check that matters — do not skip it:**
+**Check:** connect from another machine with that ID and password. You should
+get a usable desktop.
 
-1. Connect from another machine using the ID and password
-2. Confirm you get a **usable desktop**, not a black screen or a lock screen
-3. **Reboot the VM and connect again without touching the console**
+### 1b. Stop the VM going to sleep
 
-Step 3 is the whole point. A first connection working proves nothing about
-what happens after the next restart, and the next restart is when you will not
-be there.
+This is the one that actually breaks things. A Desktop image assumes somebody
+is sitting at it, so it suspends on idle and locks the screen — and a
+suspended VM is simply unreachable, while a locked one hands you a password
+prompt you cannot get past remotely.
 
-Record the ID and password in a password manager — not in this document, not
-in a chat message.
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+```
+
+Then, **in the VM's own terminal as the desktop user** — not over SSH, not
+with `sudo`, or it applies to the wrong account and silently does nothing:
+
+```bash
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+gsettings set org.gnome.desktop.session idle-delay 0
+gsettings set org.gnome.desktop.screensaver lock-enabled false
+gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
+```
+
+**Check:**
+
+```bash
+systemctl status sleep.target | head -3        # masked
+gsettings get org.gnome.desktop.screensaver lock-enabled    # false
+```
+
+### 1c. Log in automatically
+
+Only needed if we must reach the VM after a reboot with nobody at the console
+— which for unattended support we do.
+
+```bash
+sudo nano /etc/gdm3/custom.conf
+```
+
+Under `[daemon]`:
+
+```
+AutomaticLoginEnable=true
+AutomaticLogin=<desktop-user>
+```
+
+> **A trade-off to agree with their IT, not to enable quietly.** Autologin with
+> the screen lock off means anyone who can open that VM's console gets a
+> logged-in desktop on a machine that reads HR data. Reasonable for a VM in
+> their datacentre that nobody has console access to; not reasonable if that
+> console is reachable. If they would rather not, the alternative is somebody
+> logging in before each support session — put the choice to them.
+
+### 1d. The reboot test
+
+```bash
+sudo reboot
+```
+
+Once it is back, **without touching the console**:
+
+1. Connect over AnyDesk using the ID and password
+2. Confirm a usable desktop — not a lock screen, not a black screen
+3. Confirm it is still there after ten minutes idle
+
+This is the step people skip. A connection working before a reboot says
+nothing about the state that matters, and the next reboot is the one you will
+not be present for.
+
+Record the AnyDesk ID and password in a password manager — not in this
+document, not in a chat message.
 
 ---
 
@@ -200,9 +203,11 @@ sudo ACCEPT_EULA=Y apt install -y msodbcsql18 unixodbc-dev
 odbcinst -q -d          # must list [ODBC Driver 18 for SQL Server]
 ```
 
-If Microsoft has no package for this Ubuntu release yet, use the previous
-LTS's repo line — the driver is compatible. Do not substitute FreeTDS; the
-date handling differs and it has bitten us.
+On 24.04.4 the `$VERSION_ID` / `$VERSION_CODENAME` above resolve to
+`ubuntu/24.04` and `noble`; that repo was checked and is live. If Microsoft
+has no package for a future release, the previous LTS's repo line works — the
+driver is compatible. Do not substitute FreeTDS; the date handling differs and
+it has bitten us.
 
 ---
 
@@ -465,9 +470,19 @@ A clean `git clone` never hits this; a tarball of a working install does.
 The unit sets it, so an app installed under `/home/...` is invisible to it.
 Install under `/opt` as above, or drop that line.
 
-**AnyDesk connects but shows a black screen** — still on Wayland. Check
-`echo $XDG_SESSION_TYPE` in the VM's own terminal: it must say `x11`. Redo 1a
-and reboot.
+**AnyDesk connects but shows a black screen** — the session is Wayland and
+this AnyDesk build is not coping with it. It works on 24.04.4 as shipped, so
+try this only if you actually see the symptom:
+
+```bash
+echo $XDG_SESSION_TYPE          # wayland, when it should be working
+sudo sed -i 's/^#\?WaylandEnable=.*/WaylandEnable=false/' /etc/gdm3/custom.conf
+sudo reboot
+```
+
+After the reboot `echo $XDG_SESSION_TYPE` should say `x11`. Note that forcing
+Xorg may break screen sharing in other tools on the VM, so do not do it
+pre-emptively.
 
 **AnyDesk shows a lock screen you cannot get past** — the screensaver lock is
 still on. Redo the `lock-enabled false` line in 1b, as the desktop user, not
@@ -494,9 +509,9 @@ directive most likely to break them. The `--hash-password` flow, including its
 length and mismatch checks. The AnyDesk signing key, the AnyDesk apt repo, and
 the Microsoft ODBC repos for both 22.04 and 24.04 all resolve.
 
-**Not tested**: AnyDesk itself, end to end, and the GNOME settings around it.
-The machine available for testing is headless — the exact condition under
-which AnyDesk fails — so none of step 1 could be exercised here. It is written
-from AnyDesk's and GNOME's documented behaviour. Treat it as the part most
-likely to need improvisation on the day, which is why it is step 1 and why it
-ends in a reboot test rather than a first successful connection.
+**Reported working, not tested here**: AnyDesk on Ubuntu 24.04.4 LTS, which
+is why the runbook pins that build and does not force Xorg. The only machine
+available for testing is headless, so nothing in step 1 could be exercised —
+the GNOME power and lock settings are from GNOME's documented behaviour, and
+the Xorg fallback is kept in troubleshooting for the symptom rather than
+applied up front.
