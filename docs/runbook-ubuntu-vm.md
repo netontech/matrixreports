@@ -4,10 +4,13 @@ For the engineer doing the install on site. Follow it in order; every step has a
 check, and if a check fails **stop there** rather than carrying on — a later
 step will fail more confusingly.
 
-Budget about 90 minutes, most of it waiting on downloads.
+Budget about **two hours**: 90 minutes of work, plus two reboots in step 1 that
+you must not skip.
 
 `docs/running-on-premise.md` covers the CLI-only Windows case. This one covers
-an Ubuntu VM running the web portal against the live Matrix database.
+an **Ubuntu Desktop** VM running the web portal against the live Matrix
+database. Desktop rather than Server, because AnyDesk needs a graphical
+session.
 
 ---
 
@@ -18,7 +21,8 @@ what turns a 90-minute job into a two-day one.
 
 | What | Why | Check it yourself |
 | --- | --- | --- |
-| Ubuntu 22.04 or 24.04, 2 vCPU / 4 GB / 20 GB | Anything smaller and the portal competes with itself | `lsb_release -a`, `free -m`, `df -h /` |
+| **Ubuntu Desktop** 22.04 or 24.04 | AnyDesk needs a graphical session; the Server image has none | `lsb_release -a` |
+| 2 vCPU / **8 GB** / 20 GB | GNOME takes ~1.5 GB before we start. 4 GB works but leaves little headroom | `free -m`, `df -h /` |
 | `sudo` on the VM | Every install step needs it | `sudo -v` |
 | Network route to the Matrix SQL Server on **1433** | Without it nothing else matters | step 2 |
 | A **read-only** SQL login | We never write. Ever | step 3 |
@@ -32,63 +36,112 @@ the connection string and often a different port.
 
 ## 1. AnyDesk
 
-Do this **first**. If the VM turns out to need a desktop installed, that is a
-reboot, and you want to discover it before anything is running on the box.
+Do this **first**, and finish it — including the reboot test — before
+installing anything else. Everything here fails *later*, after a restart,
+when nobody is in the room.
 
-> **AnyDesk needs a graphical session.** It is not an SSH replacement. A
-> plain Ubuntu Server image has no desktop, and AnyDesk will install happily
-> and then show a black screen or refuse to connect. Check before assuming.
+Confirm it really is the Desktop image:
 
 ```bash
-# Is there a desktop at all?
-ls /usr/share/xsessions/ 2>/dev/null || echo "NO DESKTOP INSTALLED"
+ls /usr/share/xsessions/          # expect ubuntu.desktop / ubuntu-xorg.desktop
+systemctl get-default             # expect graphical.target
 ```
 
-**If there is no desktop**, install a light one (about 10 minutes):
+If that comes back empty or says `multi-user.target`, it is the Server image.
+Ask for the Desktop one. Failing that, `sudo apt install -y ubuntu-desktop`
+takes about 20 minutes and a reboot.
+
+### 1a. Switch GNOME to Xorg
+
+Ubuntu Desktop defaults to Wayland and **AnyDesk needs X11**. Skip this and
+you get a connection that shows a black screen or a frozen image.
+
+```bash
+sudo sed -i 's/^#\?WaylandEnable=.*/WaylandEnable=false/' /etc/gdm3/custom.conf
+grep WaylandEnable /etc/gdm3/custom.conf        # WaylandEnable=false
+```
+
+Takes effect at the next reboot (1d).
+
+### 1b. Stop it going to sleep
+
+A desktop image assumes someone is sitting at it, so it suspends and blanks
+the screen on idle. A suspended VM is an unreachable VM.
+
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+```
+
+And in the GNOME session, as the desktop user:
+
+```bash
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+gsettings set org.gnome.desktop.session idle-delay 0
+gsettings set org.gnome.desktop.screensaver lock-enabled false
+```
+
+The last one matters: a locked screen is exactly as useless to us as a black
+one, because AnyDesk hands you a lock screen you cannot get past without the
+desktop user's password.
+
+### 1c. Log in automatically
+
+Unattended access needs a graphical session to exist. After a reboot with no
+one logged in, there is none — only the greeter — and AnyDesk gives you very
+little.
+
+```bash
+sudo sed -i 's/^#\?  *AutomaticLoginEnable *=.*/AutomaticLoginEnable=true/; s/^#\?  *AutomaticLogin *=.*/AutomaticLogin=<desktop-user>/' /etc/gdm3/custom.conf
+grep -A2 '^\[daemon\]' /etc/gdm3/custom.conf
+```
+
+> **This is a real trade-off, so make it deliberately.** Autologin plus no
+> screen lock means anyone who can open that VM's console gets a logged-in
+> desktop on a machine that reads HR data. It is defensible for a VM inside
+> their datacentre that nobody has console access to, and it is the price of
+> unattended remote support. If their IT is not comfortable with it, the
+> alternative is that someone logs in before each support session — say so
+> rather than quietly enabling it.
+
+### 1d. Install AnyDesk and reboot
 
 ```bash
 sudo apt update
-sudo apt install -y xfce4 xfce4-goodies lightdm
-sudo systemctl enable lightdm
-```
-
-**Install AnyDesk:**
-
-```bash
 sudo apt install -y ca-certificates curl gnupg
 curl -fsSL https://keys.anydesk.com/repos/DEB-GPG-KEY \
   | sudo gpg --dearmor -o /usr/share/keyrings/anydesk.gpg
 echo "deb [signed-by=/usr/share/keyrings/anydesk.gpg] http://deb.anydesk.com/ all main" \
   | sudo tee /etc/apt/sources.list.d/anydesk.list
 sudo apt update && sudo apt install -y anydesk
+sudo systemctl enable --now anydesk
+sudo reboot
 ```
 
 If the key or repo URL has moved, take them from
 <https://anydesk.com/en/downloads/linux> rather than guessing.
 
-> **Wayland breaks AnyDesk.** Ubuntu desktop images default to Wayland, and
-> AnyDesk needs X11. If the VM has GNOME, force Xorg:
->
-> ```bash
-> sudo sed -i 's/^#\?WaylandEnable=.*/WaylandEnable=false/' /etc/gdm3/custom.conf
-> sudo systemctl restart gdm3     # disconnects any graphical session
-> ```
->
-> On the xfce/lightdm setup above this does not apply — it is X11 already.
+### 1e. Set unattended access, then prove it
 
-**Set unattended access** so we can get in without someone clicking Accept:
+After the reboot:
 
 ```bash
-sudo systemctl enable --now anydesk
-anydesk --get-id                                   # note this number down
+echo $XDG_SESSION_TYPE               # must say x11, not wayland
+anydesk --get-id                     # note this number down
 sudo sh -c 'echo "<the-password>" | anydesk --set-password'
 ```
 
-**Check:** connect from another machine using that ID and password, and confirm
-you get a desktop rather than a black screen.
+**The check that matters — do not skip it:**
 
-Record the ID and password somewhere we both can reach — a password manager,
-not this document and not a chat message.
+1. Connect from another machine using the ID and password
+2. Confirm you get a **usable desktop**, not a black screen or a lock screen
+3. **Reboot the VM and connect again without touching the console**
+
+Step 3 is the whole point. A first connection working proves nothing about
+what happens after the next restart, and the next restart is when you will not
+be there.
+
+Record the ID and password in a password manager — not in this document, not
+in a chat message.
 
 ---
 
@@ -412,6 +465,21 @@ A clean `git clone` never hits this; a tarball of a working install does.
 The unit sets it, so an app installed under `/home/...` is invisible to it.
 Install under `/opt` as above, or drop that line.
 
+**AnyDesk connects but shows a black screen** — still on Wayland. Check
+`echo $XDG_SESSION_TYPE` in the VM's own terminal: it must say `x11`. Redo 1a
+and reboot.
+
+**AnyDesk shows a lock screen you cannot get past** — the screensaver lock is
+still on. Redo the `lock-enabled false` line in 1b, as the desktop user, not
+with `sudo`.
+
+**AnyDesk worked, then stopped after a reboot** — either autologin did not
+take (1c) or the VM suspended (1b). Check `systemctl get-default` is
+`graphical.target`, and that someone is logged in at the console.
+
+**AnyDesk unreachable at odd hours** — the VM suspended. `systemctl status
+sleep.target` should show `masked`.
+
 ---
 
 ## What has been tested, and what has not
@@ -426,6 +494,9 @@ directive most likely to break them. The `--hash-password` flow, including its
 length and mismatch checks. The AnyDesk signing key, the AnyDesk apt repo, and
 the Microsoft ODBC repos for both 22.04 and 24.04 all resolve.
 
-**Not tested**: AnyDesk itself, end to end. The machine available for testing
-is headless, which is the exact condition under which AnyDesk fails — so treat
-step 1 as the part most likely to need improvisation, and do it first.
+**Not tested**: AnyDesk itself, end to end, and the GNOME settings around it.
+The machine available for testing is headless — the exact condition under
+which AnyDesk fails — so none of step 1 could be exercised here. It is written
+from AnyDesk's and GNOME's documented behaviour. Treat it as the part most
+likely to need improvisation on the day, which is why it is step 1 and why it
+ends in a reboot test rather than a first successful connection.
