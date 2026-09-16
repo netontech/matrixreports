@@ -33,6 +33,11 @@ Also ask **which machine runs Matrix** and whether the SQL Server instance is
 named (`HOST\INSTANCE`) or default. Named instances need the instance name in
 the connection string and often a different port.
 
+**Send their IT [Appendix A](#appendix-a--what-gets-installed) before the
+visit.** It lists every package that lands on the VM and what the thing talks
+to. Security teams ask for this, and being handed it unprompted is the
+difference between a half-hour conversation and a week's delay.
+
 ---
 
 ## 1. AnyDesk
@@ -515,3 +520,76 @@ available for testing is headless, so nothing in step 1 could be exercised —
 the GNOME power and lock settings are from GNOME's documented behaviour, and
 the Xorg fallback is kept in troubleshooting for the symptom rather than
 applied up front.
+
+---
+
+## Appendix A — what gets installed
+
+Give this to their IT. Nothing here is unusual, but it is much better coming
+from us up front than being discovered by a reviewer afterwards.
+
+### From Ubuntu's own repositories
+
+| Package | Why |
+| --- | --- |
+| `python3-venv`, `python3-pip` | Runs the application |
+| `git` | Fetches the code — skip it if we hand over a tarball |
+| `curl`, `gnupg`, `ca-certificates` | Needed to add the two signed repos below |
+| `netcat-openbsd` | One-off check that the VM can reach SQL on 1433 |
+| `nginx` | Terminates connections and proxies to the app |
+| `certbot`, `python3-certbot-nginx` | **Only if** the portal is reachable from outside their LAN |
+
+### From two third-party repositories, both GPG-signed
+
+| Package | Source | Why |
+| --- | --- | --- |
+| `msodbcsql18`, `unixodbc-dev` | `packages.microsoft.com` | Microsoft's own SQL Server driver. FreeTDS is not a substitute — its date handling differs |
+| `anydesk` | `deb.anydesk.com` | Remote support |
+
+### Python packages, in an isolated virtualenv
+
+Nothing touches the system Python. Eleven packages, all mainstream:
+
+```
+Flask          web framework
+gunicorn       WSGI server
+pyodbc         SQL Server driver bindings
+openpyxl       writes .xlsx
+PyYAML         reads the config
+               Jinja2, MarkupSafe, Werkzeug, click,
+               blinker, itsdangerous, et_xmlfile   (pulled in by the above)
+```
+
+No scraping libraries, no telemetry, no analytics, no outbound calls.
+
+### Security posture — the questions they will actually ask
+
+| Question | Answer |
+| --- | --- |
+| **Ports opened** | `80`, and `443` if TLS. Gunicorn binds to `127.0.0.1` only, so the app itself is not reachable from the network |
+| **Outbound connections** | The Matrix SQL Server on 1433. Nothing else. No internet needed at runtime — only during install, for package downloads |
+| **Does it write to our database?** | **No.** The login is `db_datareader` with explicit `DENY` on every write. Enforced by SQL Server, not by our good behaviour |
+| **Does it store our employee data?** | **No.** There is no database of our own, no cache, no sessions. Every request reads and closes. The only file we leave is a config |
+| **What does it run as?** | A dedicated `matrixreports` system user that cannot log in, under systemd hardening (`ProtectSystem=strict`, `ProtectHome`, `NoNewPrivileges`, `PrivateTmp`) |
+| **Where are credentials kept?** | SQL password in a `chmod 600` config file. Portal password only ever as a scrypt hash in a root-only file — the plaintext never touches the VM |
+| **Uninstall** | Stop and remove the service, delete `/opt/matrixreports`, remove the two apt repos. Nothing else to unwind |
+
+### Two items they may reasonably challenge
+
+**AnyDesk** is the only thing here granting interactive remote access to a
+machine on their network. If they refuse it, everything else still works — we
+lose unattended support and depend on them for access. Raise it rather than
+letting it be found.
+
+**Autologin** (step 1c) is the other thing a reviewer will notice, for the same
+reason. It is required for unattended access after a reboot, and it means
+console access equals a logged-in desktop. Put the choice to them.
+
+### One decision to make deliberately
+
+nginx's access log records the full request URL, which includes the report
+type, the date, and any employee codes filtered on. That is simultaneously the
+only audit trail of who looked at whose attendance, and a plaintext file with
+employee codes in it. Some organisations require the first; some object to the
+second. Ask which they want — it can be turned off, or turned into a proper
+audit log, but it should not be left as a default nobody examined.
