@@ -4,8 +4,8 @@ For the engineer doing the install on site. Follow it in order; every step has a
 check, and if a check fails **stop there** rather than carrying on — a later
 step will fail more confusingly.
 
-Budget about **two hours**: 90 minutes of work, plus two reboots in step 1 that
-you must not skip.
+Budget about **three hours**: 45 minutes installing Ubuntu, 90 minutes of
+setup, and the reboots in steps 1 and 2 that you must not skip.
 
 `docs/running-on-premise.md` covers the CLI-only Windows case. This one covers
 an **Ubuntu Desktop** VM running the web portal against the live Matrix
@@ -22,12 +22,13 @@ what turns a 90-minute job into a two-day one.
 
 | What | Why | Check it yourself |
 | --- | --- | --- |
-| **Ubuntu Desktop 24.04.4 LTS** | AnyDesk needs a graphical session, and this is the build it is known to work on | `lsb_release -d` |
-| 2 vCPU / **8 GB** / 20 GB | GNOME takes ~1.5 GB before we start. 4 GB works but leaves little headroom | `free -m`, `df -h /` |
+| A **VMware VM** with no OS, and access to build it | We install Ubuntu ourselves — step 1 | — |
+| 2 vCPU / **8 GB** / **60 GB**, **bridged** networking | Sized for Ubuntu Desktop; bridged so the portal is reachable at all | step 1a |
+| A **static IP or DHCP reservation** | HR will bookmark the address. If it moves, it breaks silently | ask their network team |
 | `sudo` on the VM | Every install step needs it | `sudo -v` |
-| Network route to the Matrix SQL Server on **1433** | Without it nothing else matters | step 2 |
-| A **read-only** SQL login | We never write. Ever | step 3 |
-| Who reaches the portal, and from where | Decides HTTP-internal vs HTTPS-with-certificate | step 8 |
+| Network route to the Matrix SQL Server on **1433** | Without it nothing else matters | step 3 |
+| A **read-only** SQL login | We never write. Ever | step 4 |
+| Who reaches the portal, and from where | Decides HTTP-internal vs HTTPS-with-certificate | step 9 |
 
 Also ask **which machine runs Matrix** and whether the SQL Server instance is
 named (`HOST\INSTANCE`) or default. Named instances need the instance name in
@@ -40,7 +41,94 @@ difference between a half-hour conversation and a week's delay.
 
 ---
 
-## 1. AnyDesk
+## 1. Install Ubuntu on the VMware VM
+
+They are handing over a bare VM, so this is ours to build. Roughly 45 minutes,
+most of it the installer running.
+
+**Use Ubuntu Desktop 24.04.4 LTS** — `ubuntu-24.04.4-desktop-amd64.iso` from
+<https://releases.ubuntu.com/24.04/>. Desktop, not Server: AnyDesk needs a
+graphical session. Check the SHA256 against `SHA256SUMS` on that page before
+using it.
+
+### 1a. VM settings, before powering on
+
+Get these right now. Two of them are painful to change once the OS is
+installed and people have the address.
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| vCPU | 2 | 4 if they are generous; report generation is CPU-bound |
+| Memory | **8 GB** | GNOME takes ~1.5 GB before we start |
+| Disk | **60 GB**, thin provisioned | Desktop plus updates is ~15 GB. 20 GB leaves no room to breathe and a full disk is a miserable failure mode |
+| Network | **Bridged** — *not* NAT | It must get a real address on their LAN. Behind NAT nobody can reach the portal, which is the whole point |
+| Firmware | UEFI | The default, and fine |
+| Guest OS type | Ubuntu Linux (64-bit) | Picks sane controller defaults |
+
+> **Ask their network team for a static IP or a DHCP reservation.** The portal
+> will be bookmarked by HR and referenced in the handover notes. If the address
+> moves after a reboot, it silently breaks for everyone and nobody will
+> associate it with the VM restarting weeks earlier.
+
+### 1b. Install Ubuntu
+
+Mount the ISO, power on, and take these choices:
+
+- **Interactive installation**, **Default selection** (a browser is needed to
+  test the portal; the extras are harmless)
+- **Install third-party software for graphics and Wi-Fi** — tick it
+- **Erase disk and install Ubuntu** — it is a dedicated VM, nothing to preserve
+- **Do NOT enable disk encryption.** An encrypted disk needs a passphrase typed
+  at every boot, at the console. That means the VM will not come back from an
+  unattended restart, which is exactly the failure this whole runbook is
+  arranged to avoid
+- Set a sensible hostname, e.g. `matrix-reports`
+- Create the desktop user — note the name, step 2c needs it
+- **Tick "Log in automatically"** if it is offered. It does the same job as
+  step 2c, and the trade-off in that step applies — so agree it with their IT
+  first rather than ticking it on autopilot
+
+Then let it run, remove the ISO, and reboot.
+
+### 1c. Immediately after first boot
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y open-vm-tools open-vm-tools-desktop
+sudo reboot
+```
+
+`open-vm-tools` is the VMware guest agent: it gives proper display resizing,
+clipboard sharing, and a graceful shutdown when their VM host restarts.
+Without it, a host reboot is an abrupt power cut to this VM.
+
+### 1d. Check the clock — this one matters more than it looks
+
+Everything this tool reports is a time. A VM whose clock has drifted produces
+attendance that is quietly, plausibly wrong — which is worse than obviously
+wrong.
+
+```bash
+timedatectl
+```
+
+Confirm `System clock synchronized: yes`, `NTP service: active`, and that the
+**time zone matches the one the Matrix server uses**. If it does not:
+
+```bash
+sudo timedatectl set-timezone Asia/Dubai        # or whatever theirs is
+sudo systemctl restart systemd-timesyncd
+```
+
+If their network blocks public NTP, ask for their internal NTP server and put
+it in `/etc/systemd/timesyncd.conf`. Do not leave it unsynchronised and hope.
+
+**Check:** `timedatectl` shows synchronised, and the date and time match the
+Matrix server's.
+
+---
+
+## 2. AnyDesk
 
 Do this **first** and finish it, including the reboot test, before installing
 anything else. AnyDesk itself is known to work on this build — what bites is
@@ -57,7 +145,7 @@ systemctl get-default     # graphical.target
 If `get-default` says `multi-user.target` it is the Server image, not Desktop.
 Stop and ask for the Desktop one.
 
-### 1a. Install AnyDesk
+### 2a. Install AnyDesk
 
 ```bash
 sudo apt update
@@ -81,7 +169,7 @@ sudo sh -c 'echo "<the-password>" | anydesk --set-password'
 **Check:** connect from another machine with that ID and password. You should
 get a usable desktop.
 
-### 1b. Stop the VM going to sleep
+### 2b. Stop the VM going to sleep
 
 This is the one that actually breaks things. A Desktop image assumes somebody
 is sitting at it, so it suspends on idle and locks the screen — and a
@@ -109,7 +197,7 @@ systemctl status sleep.target | head -3        # masked
 gsettings get org.gnome.desktop.screensaver lock-enabled    # false
 ```
 
-### 1c. Log in automatically
+### 2c. Log in automatically
 
 Only needed if we must reach the VM after a reboot with nobody at the console
 — which for unattended support we do.
@@ -132,7 +220,7 @@ AutomaticLogin=<desktop-user>
 > console is reachable. If they would rather not, the alternative is somebody
 > logging in before each support session — put the choice to them.
 
-### 1d. The reboot test
+### 2d. The reboot test
 
 ```bash
 sudo reboot
@@ -153,7 +241,7 @@ document, not in a chat message.
 
 ---
 
-## 2. Prove the VM can reach SQL Server
+## 3. Prove the VM can reach SQL Server
 
 Before installing anything else. If this fails, everything after it is wasted.
 
@@ -171,7 +259,7 @@ SQL Server Configuration Manager.
 
 ---
 
-## 3. Ask for the read-only login
+## 4. Ask for the read-only login
 
 Send their DBA this, filling in a password. **We never need more than this**,
 and asking for more is how a reporting tool ends up blamed for a data change.
@@ -189,7 +277,7 @@ but they make the intent unmistakable to whoever audits it later.
 
 ---
 
-## 4. Install the ODBC driver and Python
+## 5. Install the ODBC driver and Python
 
 ```bash
 sudo apt install -y curl gnupg python3-venv python3-pip git
@@ -216,7 +304,7 @@ it has bitten us.
 
 ---
 
-## 5. Install the application
+## 6. Install the application
 
 ```bash
 sudo useradd -r -m -d /opt/matrixreports -s /usr/sbin/nologin matrixreports
@@ -238,7 +326,7 @@ sudo -u matrixreports .venv/bin/python -c "import flask, pyodbc; print('ok')"
 
 ---
 
-## 6. Point it at the database
+## 7. Point it at the database
 
 ```bash
 sudo -u matrixreports cp config/matrix-cosec-verified.example.yaml \
@@ -282,7 +370,7 @@ direction — see `docs/cosec-schema-verified.md` for what to check.
 
 ---
 
-## 7. Set the login
+## 8. Set the login
 
 The portal **refuses to start on a public address without one**, by design.
 
@@ -306,7 +394,7 @@ through a password manager.
 
 ---
 
-## 8. Run it as a service
+## 9. Run it as a service
 
 ```bash
 sudo tee /etc/systemd/system/matrixreports.service >/dev/null <<'EOF'
@@ -392,7 +480,7 @@ their IT and write the answer in the handover notes.
 
 ---
 
-## 9. Verify before handing over
+## 10. Verify before handing over
 
 Work through all of these. A report that looks right on one day and is wrong
 on another is the failure mode that costs trust.
@@ -422,7 +510,7 @@ Then in a browser:
 
 ---
 
-## 10. Handover notes to leave behind
+## 11. Handover notes to leave behind
 
 Write these down for whoever inherits it:
 
@@ -455,7 +543,7 @@ every punch. If it is painful, ask their DBA for an index on
 `Mx_ATDEventTrn (UserID, Edatetime)`. **That is a change to their database —
 get it in writing from their DBA, and do not create it yourself.**
 
-**`refusing to bind 0.0.0.0 without authentication`** — step 7 was skipped.
+**`refusing to bind 0.0.0.0 without authentication`** — step 8 was skipped.
 Working as intended.
 
 **`status=203/EXEC` / `Permission denied` running gunicorn** — almost always a
@@ -490,11 +578,11 @@ Xorg may break screen sharing in other tools on the VM, so do not do it
 pre-emptively.
 
 **AnyDesk shows a lock screen you cannot get past** — the screensaver lock is
-still on. Redo the `lock-enabled false` line in 1b, as the desktop user, not
+still on. Redo the `lock-enabled false` line in 2b, as the desktop user, not
 with `sudo`.
 
 **AnyDesk worked, then stopped after a reboot** — either autologin did not
-take (1c) or the VM suspended (1b). Check `systemctl get-default` is
+take (2c) or the VM suspended (2b). Check `systemctl get-default` is
 `graphical.target`, and that someone is logged in at the console.
 
 **AnyDesk unreachable at odd hours** — the VM suspended. `systemctl status
@@ -516,7 +604,7 @@ the Microsoft ODBC repos for both 22.04 and 24.04 all resolve.
 
 **Reported working, not tested here**: AnyDesk on Ubuntu 24.04.4 LTS, which
 is why the runbook pins that build and does not force Xorg. The only machine
-available for testing is headless, so nothing in step 1 could be exercised —
+available for testing is headless, so nothing in step 2 could be exercised —
 the GNOME power and lock settings are from GNOME's documented behaviour, and
 the Xorg fallback is kept in troubleshooting for the symptom rather than
 applied up front.
@@ -581,7 +669,7 @@ machine on their network. If they refuse it, everything else still works — we
 lose unattended support and depend on them for access. Raise it rather than
 letting it be found.
 
-**Autologin** (step 1c) is the other thing a reviewer will notice, for the same
+**Autologin** (step 2c) is the other thing a reviewer will notice, for the same
 reason. It is required for unattended access after a reboot, and it means
 console access equals a logged-in desktop. Put the choice to them.
 
