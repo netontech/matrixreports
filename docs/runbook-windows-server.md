@@ -25,7 +25,7 @@ approvals take longer than the work.
 | --- | --- |
 | Windows Server 2019 or 2022, 2 vCPU / 8 GB / 60 GB | The portal, plus room for their agents |
 | **Administrator rights**, or someone with them on call | Every install step needs elevation |
-| **Approval to install Python and the ODBC driver** | See [Appendix A](#appendix-a--what-gets-installed). Both are Microsoft-signed or python.org-signed |
+| **Approval to install the ODBC driver** | See [Appendix A](#appendix-a--what-gets-installed). Microsoft-signed MSI. **Python is not installed** — we ship a compiled build |
 | Network route to the Matrix SQL Server on **1433** | Step 2 |
 | **How we authenticate to SQL** — Windows or SQL login | Step 3. Ask; the answer changes the config |
 | **How we get remote access** — RDP or AnyDesk | Step 1 |
@@ -157,21 +157,18 @@ whoever audits this later.
 
 ---
 
-## 4. Install Python and the ODBC driver
+## 4. Install the ODBC driver
 
-**Python 3.12** from <https://www.python.org/downloads/windows/> — the 64-bit
-installer. In the installer:
-
-- **Tick "Add python.exe to PATH"**
-- Choose **"Install for all users"**, so a service account can use it
+That is the only thing to install. **Python is not needed on this server** —
+we deliver a compiled build with the interpreter inside it, so there is no
+Python, no pip, no virtualenv, and no need for internet access on the machine.
 
 **ODBC Driver 18 for SQL Server** — the x64 MSI from Microsoft:
 <https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server>
 
-**Check**, in a *new* PowerShell window so PATH is picked up:
+**Check:**
 
 ```powershell
-python --version                       # 3.12.x
 Get-OdbcDriver -Name "*SQL Server*" | Select-Object Name
 ```
 
@@ -180,31 +177,29 @@ FreeTDS or an older driver; the date handling differs.
 
 ---
 
-## 5. Install the application
+## 5. Copy the application across
 
-```powershell
-mkdir C:\matrixreports
-cd C:\matrixreports
-# Either clone, or copy in the files we bring
-git clone <repo-url> app
-cd app
-python -m venv .venv
-.\.venv\Scripts\pip install -e ".[web,sqlserver]"
+We bring a folder. Copy it to:
+
+```
+C:\matrixreports\app
 ```
 
-If they have no internet access on the server, bring the wheels — see
-"If the machine has no internet access" in `docs/running-on-premise.md`.
+That is the whole installation — a compiled `matrixreports.exe`, the DLLs it
+needs, and the report templates. Nothing is written to the registry, nothing
+lands in Program Files, and no interpreter is installed.
 
 **Check:**
 
 ```powershell
-.\.venv\Scripts\python -c "import flask, pyodbc, waitress; print('ok')"
+cd C:\matrixreports\app
+.\matrixreports.exe --help          # lists discover, check, daily, ...
+.\matrixreports.exe web --help      # the portal's options
 ```
 
-> **Note for anyone who has done the Linux install**: on Windows the server is
-> **waitress**, not gunicorn. Gunicorn forks, and there is no `fork()` on
-> Windows, so it cannot run there at all. `pip install -e ".[web]"` already
-> pulls waitress.
+> One executable does both jobs. `matrixreports.exe web` starts the portal;
+> every other argument goes to the command line, so `check`, `discover` and
+> `daily` work exactly as documented elsewhere.
 
 ---
 
@@ -214,6 +209,11 @@ If they have no internet access on the server, bring the wheels — see
 copy config\matrix-cosec-verified.example.yaml config\matrixreports.yaml
 notepad config\matrixreports.yaml
 ```
+
+The config sits **beside the executable**, in plain YAML. It is deliberately
+not compiled in — the schema mapping, shift times and thresholds are things
+that get tuned on site, and locking them inside the binary would mean a
+rebuild for every change.
 
 Leave the whole `schema:` block alone — it is the verified mapping. Set the
 `database` block to match step 3:
@@ -250,7 +250,7 @@ icacls config\matrixreports.yaml /inheritance:r /grant "Administrators:R" "SYSTE
 **Check the connection and the mapping in one go:**
 
 ```powershell
-.\.venv\Scripts\matrixreports --config config\matrixreports.yaml check --from 2026-06-01 --to 2026-06-30
+.\matrixreports.exe --config config\matrixreports.yaml check --from 2026-06-01 --to 2026-06-30
 ```
 
 You want an employee count, a punch count and a breaks-per-day histogram.
@@ -266,7 +266,7 @@ You want an employee count, a punch count and a breaks-per-day histogram.
 If the mapping looks wrong, let it work the schema out rather than guessing:
 
 ```powershell
-.\.venv\Scripts\matrixreports --config config\matrixreports.yaml discover --write config\discovered.yaml
+.\matrixreports.exe --config config\matrixreports.yaml discover --write config\discovered.yaml
 ```
 
 Read the draft before using it — `docs/cosec-schema-verified.md` lists the
@@ -281,7 +281,7 @@ roles `discover` gets wrong on this schema.
 The portal **refuses to start on a public address without one**, by design.
 
 ```powershell
-.\.venv\Scripts\matrixreports-web --hash-password
+.\matrixreports.exe web --hash-password
 ```
 
 It prompts twice and prints a hash. The plaintext never goes on the server —
@@ -305,8 +305,7 @@ Create `C:\matrixreports\start-portal.ps1`:
 
 ```powershell
 Set-Location C:\matrixreports\app
-& .\.venv\Scripts\python.exe -m waitress `
-    --host=127.0.0.1 --port=8000 --threads=8 webapp.app:app
+& .\matrixreports.exe web --host 127.0.0.1 --port 8000
 ```
 
 Register it:
@@ -458,13 +457,17 @@ gates everything else, so send it ahead of the visit.
 
 | Software | Source | Why |
 | --- | --- | --- |
-| Python 3.12 (64-bit) | python.org, signed | Runs the application |
 | ODBC Driver 18 for SQL Server | Microsoft, signed MSI | The only supported way to reach SQL Server |
-| Our application + 11 Python packages | In an isolated virtualenv under `C:\matrixreports` | The reports |
+| Our application — one folder, no installer | We supply it | The reports |
 | *(optional)* IIS role + ARR + URL Rewrite | Microsoft | Only if the portal needs TLS |
 | *(optional)* AnyDesk | anydesk.com | Only if they do not want us using RDP |
 
-The Python packages, all mainstream:
+**That is the entire list.** The application is a compiled build: the Python
+interpreter and every library are inside the executable, so **no Python is
+installed on the server**, nothing goes into the registry or Program Files,
+and no package downloads happen on their network.
+
+The libraries compiled in, all mainstream:
 
 ```
 Flask          web framework
@@ -478,6 +481,10 @@ PyYAML         reads the config
 
 No scraping libraries, no telemetry, no analytics, no outbound calls.
 
+**Uninstalling** is deleting `C:\matrixreports` and removing the scheduled
+task. The ODBC driver can stay or go depending on whether anything else uses
+it.
+
 ### The questions their security team will ask
 
 | Question | Answer |
@@ -488,7 +495,7 @@ No scraping libraries, no telemetry, no analytics, no outbound calls.
 | **Does it store our employee data?** | **No.** No database of our own, no cache, no sessions. Every request reads and closes. The only file we leave is a config |
 | **What identity does it run as?** | A domain service account with read-only SQL access — or `SYSTEM` if they prefer a SQL login |
 | **Where are credentials kept?** | With Windows Authentication, **nowhere** — that is the main reason to prefer it. Otherwise the SQL password sits in an ACL'd config file. The portal password is only ever a scrypt hash in a machine environment variable |
-| **Uninstall** | Remove the scheduled task, delete `C:\matrixreports`, uninstall Python and the ODBC driver if nothing else uses them |
+| **Uninstall** | Remove the scheduled task and delete `C:\matrixreports`. Nothing else to unwind — no registry keys, no installed runtime |
 
 ### One decision to make deliberately
 
@@ -498,3 +505,39 @@ audit trail of who looked at whose attendance and a plaintext file containing
 employee codes. Some organisations require the first; some object to the
 second. Ask which they want rather than leaving it as a default nobody
 examined.
+
+---
+
+## Appendix B — building the executable
+
+For us, not for the customer. **Do this before travelling**, on a Windows
+machine — Nuitka does not cross-compile, so a Windows `.exe` needs Windows.
+
+```powershell
+git clone <repo-url> matrixreports
+cd matrixreports
+python -m venv .venv
+.\.venv\Scripts\pip install -e ".[web,sqlserver,build]"
+.\.venv\Scripts\python scripts\build_exe.py --check
+```
+
+The result is `dist\launcher.dist\` — that folder is what gets copied to the
+server in step 5. Copy `config\matrix-cosec-verified.example.yaml` in beside
+it.
+
+Two things to watch:
+
+- **Build with `[sqlserver]` installed.** The build script skips driver
+  packages that are not present and prints a warning. A build made without
+  `pyodbc` compiles fine and then cannot reach SQL Server at all — read the
+  warnings rather than scrolling past them.
+- **`--check` runs a smoke test** on the result: that the binary starts, that
+  both the command line and the portal respond, and that the report templates
+  were carried into the build. Templates are the usual thing to be missing,
+  because Flask loads them from disk at runtime and nothing imports them.
+
+The build is why the customer's IT cannot read the source: the output is
+machine code, not `.py` files. A Docker image would not have achieved that —
+an image is a tar archive with the sources sitting inside it.
+
+---

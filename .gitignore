@@ -9,3 +9,4 @@ venv/
 out/
 config/matrixreports.yaml
 *.local.yaml
+dist/
