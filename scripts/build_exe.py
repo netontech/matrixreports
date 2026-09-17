@@ -97,9 +97,49 @@ def build(check: bool) -> int:
         print("build finished but no binary found", file=sys.stderr)
         return 1
     print(f"\nbuilt: {binary}")
-    print(f"folder: {binary.parent}  ({_size(binary.parent):,} bytes)")
 
-    return smoke_test(binary) if check else 0
+    result = smoke_test(binary) if check else 0
+    if result != 0:
+        return result
+    return package(binary.parent)
+
+
+def package(built: pathlib.Path) -> int:
+    """Assemble the folder that actually gets copied to the server.
+
+    Nuitka leaves its output in ``launcher.dist``, which is both an unhelpful
+    name and missing the config template - the binary alone cannot be pointed
+    at a database. Anything the engineer needs on site belongs in one folder so
+    there is nothing to remember to bring separately.
+    """
+    plat = "windows" if platform.system() == "Windows" else platform.system().lower()
+    out = DIST / f"{NAME}-{plat}"
+    if out.exists():
+        shutil.rmtree(out)
+    shutil.copytree(built, out)
+
+    config_dir = out / "config"
+    config_dir.mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "config" / "matrix-cosec-verified.example.yaml", config_dir)
+
+    (out / "READ-ME-FIRST.txt").write_text(
+        "Matrix attendance reports\n"
+        "=========================\n\n"
+        "Copy this whole folder to the server. Nothing needs installing except\n"
+        "the Microsoft ODBC Driver 18 for SQL Server.\n\n"
+        "  1. copy config\\matrix-cosec-verified.example.yaml to\n"
+        "     config\\matrixreports.yaml and fill in the database section\n"
+        "  2. matrixreports check --from <date> --to <date>   confirm it reads\n"
+        "  3. matrixreports web --hash-password               set the login\n"
+        "  4. matrixreports web --host 127.0.0.1 --port 8000  start the portal\n\n"
+        "Full instructions: docs/runbook-windows-server.md\n"
+    )
+
+    files = sum(1 for f in out.rglob("*") if f.is_file())
+    print(f"\nDELIVER THIS FOLDER:\n  {out}")
+    print(f"  {files} files, {_size(out) / 1_048_576:.0f} MB")
+    print(f"  -> copy to C:\\matrixreports\\app on the server")
+    return 0
 
 
 def _size(folder: pathlib.Path) -> int:

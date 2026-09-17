@@ -179,15 +179,30 @@ FreeTDS or an older driver; the date handling differs.
 
 ## 5. Copy the application across
 
-We bring a folder. Copy it to:
+We bring **one folder**, produced by the build in Appendix B and named:
+
+```
+matrixreports-windows\
+```
+
+Copy the whole thing to:
 
 ```
 C:\matrixreports\app
 ```
 
-That is the whole installation — a compiled `matrixreports.exe`, the DLLs it
-needs, and the report templates. Nothing is written to the registry, nothing
-lands in Program Files, and no interpreter is installed.
+That is the entire installation. Inside it:
+
+| | |
+| --- | --- |
+| `matrixreports.exe` | the application — portal and command line both |
+| `*.dll`, `python3xx.dll` | the interpreter and libraries, compiled in |
+| `webapp\templates\`, `webapp\static\` | the report layouts |
+| `config\matrix-cosec-verified.example.yaml` | the verified schema mapping, to copy in step 6 |
+| `READ-ME-FIRST.txt` | the short version, for whoever opens the folder later |
+
+Around 60 MB. Nothing is written to the registry, nothing lands in Program
+Files, and no interpreter is installed.
 
 **Check:**
 
@@ -534,9 +549,12 @@ python -m venv .venv
 .\.venv\Scripts\python scripts\build_exe.py --check
 ```
 
-The result is `dist\launcher.dist\` — that folder is what gets copied to the
-server in step 5. Copy `config\matrix-cosec-verified.example.yaml` in beside
-it.
+The result is **`dist\matrixreports-windows\`** — that is the folder that
+goes to the server in step 5, with the config template and a short
+`READ-ME-FIRST.txt` already inside it. Nothing else needs collecting.
+
+(Nuitka's own output lands in `dist\launcher.dist\`. Do not ship that one —
+it has no config template in it.)
 
 Two things to watch:
 
