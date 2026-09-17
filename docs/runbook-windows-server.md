@@ -1,149 +1,40 @@
-# Runbook — deploying on the client's Windows Server
+# Runbook — installing on the client's Windows Server
 
-For the engineer doing the install on site. Follow it in order; every step has
-a check, and if a check fails **stop there** rather than carrying on.
+Done remotely over AnyDesk. About 60 minutes once you are connected.
 
-Budget about 90 minutes.
-
-The server is built to the client's own standard — domain-joined, patched,
-with their anti-virus. That is a better place to be than a VM we built, but it
-means **we adapt to their build rather than the other way round**: expect an
-approval for every piece of software, and ask early.
-
-`docs/runbook-ubuntu-vm.md` is the Linux equivalent, kept for reference.
-`docs/running-on-premise.md` covers running the reports from the command line
-with no portal.
+Follow it in order. Every step has a check — **if a check fails, stop there**
+rather than carrying on, because a later step will fail more confusingly and
+you will end up debugging the wrong thing.
 
 ---
 
-## 0. Before you start — get these from their IT
+## What you need before you connect
 
-Do not begin until all of these are settled. On a managed, AV'd server the
-approvals take longer than the work.
+**Three things from their side. Get all three before starting.**
 
-| What | Why |
-| --- | --- |
-| Windows Server 2019 or 2022, 2 vCPU / 8 GB / 60 GB | The portal, plus room for their agents |
-| **Administrator rights**, or someone with them on call | Every install step needs elevation |
-| **Approval to install the ODBC driver** | See [Appendix A](#appendix-a--what-gets-installed). Microsoft-signed MSI. **Python is not installed** — we ship a compiled build |
-| Network route to the Matrix SQL Server on **1433** | Step 2 |
-| **How we authenticate to SQL** — Windows or SQL login | Step 3. Ask; the answer changes the config |
-| **How we get remote access** — RDP or AnyDesk | Step 1 |
-| Who reaches the portal, and from where | Decides HTTP-internal vs HTTPS |
-| **AV exclusion** for the install folder | Step 1c — otherwise expect odd, intermittent failures |
+| # | What | Looks like | Why |
+| --- | --- | --- | --- |
+| 1 | **Matrix SQL Server address** | `10.20.30.40` or `SQLHOST\COSEC` | What we connect to |
+| 2 | **Authentication method** | Windows, or SQL login | Changes the config line entirely |
+| 3 | **The credentials** | A service account, or a username and password | How we sign in |
 
-Also ask **which machine runs Matrix**, and whether the SQL Server instance is
-named (`HOST\INSTANCE`) or default. Named instances need the instance name and
-often a different port.
+On (2), ask their DBA which they prefer — **Windows Authentication is better
+for everyone**: nothing about it gets written into our config file, so there is
+no password sitting on their server for someone to find later. If they say SQL
+login, that is fine too; step 5 covers both.
 
----
-
-## 1. Access and ground rules
-
-### 1a. Remote access — ask before installing anything
-
-Windows Server already has **RDP**, and in a managed estate that is almost
-certainly what their IT will want us to use. It is built in, already governed
-by their policy, and needs no approval.
-
-**Ask first. Do not install AnyDesk on a managed server on your own
-initiative** — on their standard build it is unapproved software on a domain
-member, and installing it unasked is the kind of thing that sours a project.
-
-If they do want AnyDesk, it is a normal MSI from
-<https://anydesk.com/en/downloads/windows> and none of the Linux complications
-apply: no Wayland, no autologin, no desktop to install. Set unattended access
-in Settings → Security.
-
-**Check:** you can reach the server the agreed way, and get back in after a
-reboot.
-
-### 1b. Confirm the build
-
-In an elevated PowerShell:
-
-```powershell
-Get-ComputerInfo | Select-Object OsName, OsVersion, CsName, CsDomain
-Get-Volume C | Select-Object SizeRemaining
-[Environment]::Is64BitOperatingSystem
-```
-
-### 1c. Ask for an AV exclusion, now
-
-Their anti-virus will scan every file Python touches. In the worst case it
-quarantines something mid-install; more often it just makes everything slow and
-occasionally fails a step for no visible reason.
-
-Ask for an exclusion on the install folder:
-
-```
-C:\matrixreports
-```
-
-If they will not grant one, carry on — but if a later step fails oddly and
-then works on retry, this is the first thing to suspect.
-
-### 1d. Check the clock
-
-Everything this tool reports is a time. A server whose clock has drifted
-produces attendance that is quietly, plausibly wrong, which is worse than
-obviously wrong.
-
-```powershell
-w32tm /query /status
-Get-TimeZone
-```
-
-Domain-joined servers normally sync from the domain controller and are fine.
-Confirm the **time zone matches the Matrix server's** — if the two disagree,
-every report is shifted.
-
----
-
-## 2. Prove the server can reach SQL Server
-
-Before installing anything. If this fails, everything after it is wasted.
-
-```powershell
-Test-NetConnection -ComputerName <matrix-sql-host> -Port 1433
-```
-
-`TcpTestSucceeded : True` is what you want.
-
-If it fails it is a firewall or a route, and it is their IT's to fix. If the
-instance is named, `SQL Server Browser` on UDP 1434 may also be needed — their
-DBA will know.
-
----
-
-## 3. Decide how we authenticate, then get it set up
-
-Two options. **Ask their DBA which they prefer** — most managed estates prefer
-the first, and it is better for us too.
-
-### Option A — Windows Authentication (preferred)
-
-A domain service account, granted read access. **No password is stored
-anywhere in our configuration**, which removes a whole category of audit
-question.
-
-Ask their DBA for a service account, e.g. `DOMAIN\svc_matrixreports`, and:
+Whichever it is, we need **read access only**. If the account does not exist
+yet, send them this:
 
 ```sql
+-- Windows Authentication
 CREATE LOGIN [DOMAIN\svc_matrixreports] FROM WINDOWS;
 USE COSEC;
 CREATE USER [DOMAIN\svc_matrixreports] FOR LOGIN [DOMAIN\svc_matrixreports];
 ALTER ROLE db_datareader ADD MEMBER [DOMAIN\svc_matrixreports];
 DENY INSERT, UPDATE, DELETE, ALTER, EXECUTE TO [DOMAIN\svc_matrixreports];
-```
 
-The service must then **run as that account** (step 7).
-
-### Option B — a SQL login
-
-If they do not do service accounts:
-
-```sql
+-- or, a SQL login
 CREATE LOGIN matrixreports WITH PASSWORD = '<strong-password>';
 USE COSEC;
 CREATE USER matrixreports FOR LOGIN matrixreports;
@@ -151,20 +42,69 @@ ALTER ROLE db_datareader ADD MEMBER matrixreports;
 DENY INSERT, UPDATE, DELETE, ALTER, EXECUTE TO matrixreports;
 ```
 
-Either way: **`db_datareader` and nothing more.** The `DENY` lines are belt and
-braces — that role cannot write — but they make the intent unmistakable to
-whoever audits this later.
+`db_datareader` and nothing more. The `DENY` lines are belt and braces — that
+role cannot write anyway — but they make the intent unmistakable to whoever
+audits this later.
+
+### Arranged in advance, not by you on the day
+
+- **AnyDesk access** to the server, with unattended access set, so you can get
+  back in after a reboot
+- **Administrator rights** on the server, or somebody with them available
+- **Approval to install the Microsoft ODBC driver** — send them
+  [Appendix A](#appendix-a--what-gets-installed); it is the only thing we install
+- **An anti-virus exclusion** for `C:\matrixreports`
+- **The built application folder**, on your machine ready to transfer — see
+  [Appendix B](#appendix-b--building-the-application-folder). Build it before
+  the session, not during it
 
 ---
 
-## 4. Install the ODBC driver
+## 1. Connect and check the ground
 
-That is the only thing to install. **Python is not needed on this server** —
-we deliver a compiled build with the interpreter inside it, so there is no
-Python, no pip, no virtualenv, and no need for internet access on the machine.
+Connect over AnyDesk, then in an **elevated PowerShell**:
 
-**ODBC Driver 18 for SQL Server** — the x64 MSI from Microsoft:
+```powershell
+Get-ComputerInfo | Select-Object OsName, CsName, CsDomain
+Get-Volume C | Select-Object SizeRemaining
+w32tm /query /status
+Get-TimeZone
+```
+
+You want at least 2 GB free on C:.
+
+**The clock is what matters here.** Everything this tool reports is a time, so
+a server whose clock or time zone is wrong produces attendance that is quietly,
+plausibly wrong — far worse than obviously wrong, because nobody catches it.
+Confirm the time zone **matches the Matrix server's**. Domain-joined servers
+normally sync correctly; check anyway.
+
+---
+
+## 2. Prove the server can reach SQL Server
+
+**Before installing anything.** If this fails, everything after it is wasted
+effort.
+
+```powershell
+Test-NetConnection -ComputerName <sql-server-ip> -Port 1433
+```
+
+`TcpTestSucceeded : True` is what you want.
+
+If it fails it is a firewall or a routing problem, and it is **their IT's to
+fix** — do not try to work around it. If the instance is named
+(`SQLHOST\COSEC`), UDP 1434 may also be needed; their DBA will know.
+
+---
+
+## 3. Install the ODBC driver
+
+The only thing we install on their server.
+
+Download the **x64 MSI** for *ODBC Driver 18 for SQL Server* from
 <https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server>
+and run it.
 
 **Check:**
 
@@ -172,37 +112,24 @@ Python, no pip, no virtualenv, and no need for internet access on the machine.
 Get-OdbcDriver -Name "*SQL Server*" | Select-Object Name
 ```
 
-You need `ODBC Driver 18 for SQL Server` in that list. Do not substitute
-FreeTDS or an older driver; the date handling differs.
+`ODBC Driver 18 for SQL Server` must appear. Do not substitute FreeTDS or an
+older driver — the date handling differs and it will produce wrong times.
 
 ---
 
-## 5. Copy the application across
+## 4. Transfer the application
 
-We bring **one folder**, produced by the build in Appendix B and named:
-
-```
-matrixreports-windows\
-```
-
-Copy the whole thing to:
+Zip `matrixreports-windows\` on your machine, send it with **AnyDesk's file
+transfer**, and unzip on the server to:
 
 ```
 C:\matrixreports\app
 ```
 
-That is the entire installation. Inside it:
+Around 60 MB, so give it a minute.
 
-| | |
-| --- | --- |
-| `matrixreports.exe` | the application — portal and command line both |
-| `*.dll`, `python3xx.dll` | the interpreter and libraries, compiled in |
-| `webapp\templates\`, `webapp\static\` | the report layouts |
-| `config\matrix-cosec-verified.example.yaml` | the verified schema mapping, to copy in step 6 |
-| `READ-ME-FIRST.txt` | the short version, for whoever opens the folder later |
-
-Around 60 MB. Nothing is written to the registry, nothing lands in Program
-Files, and no interpreter is installed.
+No installer, no Python — the interpreter and every library are inside the
+executable.
 
 **Check:**
 
@@ -213,70 +140,72 @@ cd C:\matrixreports\app
 ```
 
 > One executable does both jobs. `matrixreports.exe web` starts the portal;
-> every other argument goes to the command line, so `check`, `discover` and
-> `daily` work exactly as documented elsewhere.
+> any other argument is the command line.
 
 ---
 
-## 6. Point it at the database
+## 5. Point it at the database
+
+This is where your three pieces of information go.
 
 ```powershell
+cd C:\matrixreports\app
 copy config\matrix-cosec-verified.example.yaml config\matrixreports.yaml
 notepad config\matrixreports.yaml
 ```
 
-The config sits **beside the executable**, in plain YAML. It is deliberately
-not compiled in — the schema mapping, shift times and thresholds are things
-that get tuned on site, and locking them inside the binary would mean a
-rebuild for every change.
+**Leave the `schema:` block exactly as it is** — that is the verified mapping,
+and it is the part that took longest to get right. Only edit `database:`.
 
-Leave the whole `schema:` block alone — it is the verified mapping. Set the
-`database` block to match step 3:
-
-**Option A — Windows Authentication.** No password anywhere:
+**Windows Authentication** — note there is no password anywhere:
 
 ```yaml
 database:
   driver: sqlserver
-  dsn: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=<host>,1433;DATABASE=COSEC;Trusted_Connection=yes;TrustServerCertificate=yes"
+  dsn: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=<ip-or-host>,1433;DATABASE=COSEC;Trusted_Connection=yes;TrustServerCertificate=yes"
 ```
 
-**Option B — a SQL login:**
+**A SQL login:**
 
 ```yaml
 database:
   driver: sqlserver
-  dsn: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=<host>,1433;DATABASE=COSEC;UID=matrixreports;PWD=<password>;TrustServerCertificate=yes"
+  dsn: "DRIVER={ODBC Driver 18 for SQL Server};SERVER=<ip-or-host>,1433;DATABASE=COSEC;UID=<user>;PWD=<password>;TrustServerCertificate=yes"
 ```
+
+For a named instance use `SERVER=<host>\<instance>` and drop the `,1433`.
 
 `TrustServerCertificate=yes` is needed because Driver 18 encrypts by default
-and their SQL Server probably has no certificate your server trusts. The
-connection is still encrypted; the certificate simply is not validated.
-Acceptable on a LAN — and worth saying to their security team in those words,
-because "TrustServerCertificate" reads worse than it is.
+and their SQL Server almost certainly has no certificate this machine trusts.
+**The connection is still encrypted** — the certificate simply is not
+validated. Worth saying in exactly those words if their security team asks,
+because the option name reads worse than it is.
 
-If using a SQL login, restrict the file so only administrators and the service
-account can read it:
+If you used a SQL login, lock the file down:
 
 ```powershell
 icacls config\matrixreports.yaml /inheritance:r /grant "Administrators:R" "SYSTEM:R"
 ```
 
-**Check the connection and the mapping in one go:**
+---
+
+## 6. Confirm it reads the data correctly
 
 ```powershell
 .\matrixreports.exe --config config\matrixreports.yaml check --from 2026-06-01 --to 2026-06-30
 ```
 
-You want an employee count, a punch count and a breaks-per-day histogram.
+Use a month you know had people in the building. You want an employee count, a
+punch count, and a breaks-per-day histogram.
 
 | What you see | What it means |
 | --- | --- |
-| `Login failed for user` | Wrong credentials, or SQL Server is set to Windows-auth only |
-| `No punches found` | Wrong table, or that range has no data. Try a month you know is busy |
+| `Login failed for user` | Wrong credentials, or SQL Server is Windows-auth-only |
+| `Data source name not found` | ODBC driver missing, or the 32-bit one was installed |
+| `No punches found` | Wrong table, or no data in that range. Try another month |
 | Employees but no punches | `employees.id` and `punches.emp_id` are different keys |
-| Every day shows 0 breaks | Pointed at `Mx_DATDTrn`, the summary. It must be `Mx_ATDEventTrn` |
-| Lots of `DIRECTION_INFERRED` | `direction_in` / `direction_out` do not match `IOType` |
+| **Every day shows 0 breaks** | Pointed at `Mx_DATDTrn`, the summary table. It must be `Mx_ATDEventTrn` |
+| Many `DIRECTION_INFERRED` | `direction_in` / `direction_out` do not match `IOType` |
 
 If the mapping looks wrong, let it work the schema out rather than guessing:
 
@@ -284,37 +213,37 @@ If the mapping looks wrong, let it work the schema out rather than guessing:
 .\matrixreports.exe --config config\matrixreports.yaml discover --write config\discovered.yaml
 ```
 
-Read the draft before using it — `docs/cosec-schema-verified.md` lists the
-roles `discover` gets wrong on this schema.
+**Read the draft before using it.** On this schema `discover` reliably picks a
+biometric-template table as the employee master and a constant column as the
+direction — `docs/cosec-schema-verified.md` lists what to check.
 
 ---
 
-## 7. Set the login and run it as a service
+## 7. Set the portal login
 
-### 7a. The portal login
-
-The portal **refuses to start on a public address without one**, by design.
+The portal **refuses to start on a network address without one**, by design.
 
 ```powershell
 .\matrixreports.exe web --hash-password
 ```
 
-It prompts twice and prints a hash. The plaintext never goes on the server —
-give it to whoever runs HR through a password manager.
-
-Store the hash as a **machine-level** environment variable:
+It asks twice and prints a hash. Store it at machine level:
 
 ```powershell
 [Environment]::SetEnvironmentVariable("MATRIXREPORTS_AUTH_USER", "hr", "Machine")
-[Environment]::SetEnvironmentVariable("MATRIXREPORTS_AUTH_PASSWORD_HASH", "<paste the hash>", "Machine")
+[Environment]::SetEnvironmentVariable("MATRIXREPORTS_AUTH_PASSWORD_HASH", "<the hash>", "Machine")
 [Environment]::SetEnvironmentVariable("MATRIXREPORTS_CONFIG", "C:\matrixreports\app\config\matrixreports.yaml", "Machine")
 ```
 
-### 7b. Run it at startup
+**The plaintext password never goes on the server** — only the hash. Give the
+password to whoever runs HR through a password manager, not over chat.
 
-Windows has no systemd. Use a **Scheduled Task**, which is native, needs no
-third-party service wrapper, and is something their IT will accept without a
-conversation.
+---
+
+## 8. Start it at boot
+
+Windows has no systemd. A Scheduled Task is native, needs no third-party
+service wrapper, and nobody has to approve it.
 
 Create `C:\matrixreports\start-portal.ps1`:
 
@@ -323,179 +252,181 @@ Set-Location C:\matrixreports\app
 & .\matrixreports.exe web --host 127.0.0.1 --port 8000
 ```
 
-Register it:
+Register it — **from a new PowerShell window**, so it picks up the environment
+variables from step 7:
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
              -Argument "-NoProfile -ExecutionPolicy Bypass -File C:\matrixreports\start-portal.ps1"
 $trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
-             -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
-             -ExecutionTimeLimit ([TimeSpan]::Zero)
+$settings = New-ScheduledTaskSettingsSet -RestartCount 3 `
+             -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-# Option A: run as the domain service account (Windows Authentication)
+# Windows Authentication - MUST run as the service account, since that is the
+# identity SQL Server sees:
 Register-ScheduledTask -TaskName "MatrixReports Portal" -Action $action -Trigger $trigger `
   -Settings $settings -User "DOMAIN\svc_matrixreports" -Password "<password>" -RunLevel Highest
 
-# Option B, if using a SQL login instead:
+# SQL login instead - SYSTEM is fine:
 # Register-ScheduledTask -TaskName "MatrixReports Portal" -Action $action -Trigger $trigger `
 #   -Settings $settings -User "SYSTEM" -RunLevel Highest
 
 Start-ScheduledTask -TaskName "MatrixReports Portal"
 ```
 
-**The account matters.** With Windows Authentication the task *must* run as the
-service account, because that is the identity SQL Server sees.
-
 **Check:**
 
 ```powershell
 Get-ScheduledTask -TaskName "MatrixReports Portal" | Select-Object State
-(Invoke-WebRequest http://127.0.0.1:8000/ -SkipHttpErrorCheck).StatusCode   # 401
+(Invoke-WebRequest http://127.0.0.1:8000/ -SkipHttpErrorCheck).StatusCode
 ```
 
-`401` is correct — the login is working.
+**`401` is the correct answer** — it means the login is working.
 
-### 7c. Make it reachable
+---
 
-Waitress is bound to loopback on purpose. How you expose it depends on the
-answer from step 0.
+## 9. Make it reachable
 
-**Internal only, plain HTTP** — simplest. Bind waitress to the LAN instead, by
-changing `--host=127.0.0.1` to `--host=0.0.0.0` in the script, and open the
-port:
+Waitress is on loopback deliberately. How you expose it depends on where HR
+sits.
+
+**Inside their network only** — change `--host 127.0.0.1` to `--host 0.0.0.0`
+in `start-portal.ps1`, restart the task, and open the port:
 
 ```powershell
 New-NetFirewallRule -DisplayName "MatrixReports Portal" -Direction Inbound `
   -Protocol TCP -LocalPort 8000 -Action Allow -Profile Domain
 ```
 
-**Reachable from outside their LAN — it needs TLS.** Waitress does not do TLS,
-so put **IIS** in front of it: add the *Web Server (IIS)* role, install
-*Application Request Routing* and *URL Rewrite*, enable proxying, and add a
-rewrite rule to `http://127.0.0.1:8000/`. Bind their certificate in IIS.
+HR then uses `http://<server-ip>:8000`.
 
-IIS is a Windows Server role rather than third-party software, which is why it
-is the right answer here even though it is heavier than nginx.
+**Reachable from outside their network — it needs TLS.** Do not skip it: the
+login and every employee's hours would otherwise cross the network in clear
+text. Put **IIS** in front (Web Server role, plus Application Request Routing
+and URL Rewrite), proxy to `http://127.0.0.1:8000/`, and bind their
+certificate. IIS is a Windows role, not third-party software, which is why it
+is the right answer here.
 
-Without TLS, the login and every employee's hours cross the network in clear
-text. Do not let "it is only internal" decide this by default — get it in
-writing which it is.
+**Get it in writing which of the two this is.** "It is only internal" is a
+thing people say without checking.
 
 ---
 
-## 8. Verify before handing over
+## 10. Verify before handing over
 
 ```powershell
-Restart-Computer          # then, once back:
+Restart-Computer
+```
+
+Reconnect over AnyDesk **without anyone touching the console**, then:
+
+```powershell
 Get-ScheduledTask -TaskName "MatrixReports Portal" | Select-Object State
 ```
 
-The restart test is the important one: a portal that works until the next
-patch Tuesday is not deployed.
+The restart test is the one that matters. A portal that works until their next
+patch Tuesday is not installed — and you will not be in the room for it.
 
 Then in a browser:
 
-- [ ] A **busy** day renders **more than 5** OUT/IN groups. Use the
-      **"Show the busiest day this month"** link — on a quiet day five groups
-      is the minimum layout and proves nothing
+- [ ] Open a **busy** day — use the **"Show the busiest day this month"** link.
+      On a quiet day the report shows five OUT/IN groups, which is the minimum
+      layout and proves nothing. A busy day shows eight, ten, more
 - [ ] `1st In` and `Last Out` match Matrix's own report for a few employees
 - [ ] The absent list is **plausible**. If a third of the company shows absent,
       visitor passes or `ATDCalcEnbl` are not filtered — see
       `docs/cosec-schema-verified.md`
 - [ ] Excel and CSV download and open
 - [ ] All six report types render
-- [ ] Wrong password gives `401`
+- [ ] A wrong password gives `401`
 
 ---
 
-## 9. Handover notes to leave behind
+## 11. Leave these notes behind
 
-- Server name, and how to reach it (RDP or AnyDesk)
-- Which SQL identity it uses, and that it is read-only
+- Server name, and the AnyDesk ID
+- Which SQL identity it uses, and that it is **read-only**
 - The portal URL, and who holds the HR password
 - Restart: `Restart-ScheduledTask -TaskName "MatrixReports Portal"`
 - Config: `C:\matrixreports\app\config\matrixreports.yaml`
-- **Who to ask when the numbers look wrong** — usually HR data, not the tool:
-  visitor passes, `ATDCalcEnbl`, and missing leaving dates
+- **Who to call when the numbers look wrong.** Nine times in ten it is their HR
+  data rather than the tool: a visitor pass, an `ATDCalcEnbl` flag, a missing
+  leaving date
 
 ---
 
 ## Troubleshooting
 
-**`Login failed for user`** — with Windows Authentication, the task is running
-as the wrong account; check the task's identity. With a SQL login, SQL Server
-may be in Windows-auth-only mode, which their DBA has to change.
+**`Login failed for user`** — with Windows Authentication the task is running
+as the wrong account; check its identity in Task Scheduler. With a SQL login,
+SQL Server may be in Windows-auth-only mode, which their DBA has to change.
 
-**`Data source name not found`** — the ODBC driver is missing, or you installed
-the 32-bit one against 64-bit Python. `Get-OdbcDriver` should list
-`ODBC Driver 18 for SQL Server`.
+**`Data source name not found and no default driver specified`** — the ODBC
+driver is missing, or the 32-bit one was installed. `Get-OdbcDriver` should
+list `ODBC Driver 18 for SQL Server`.
 
 **`SSL Provider: certificate chain was issued by an authority that is not
 trusted`** — expected on a LAN. Add `TrustServerCertificate=yes` to the `dsn`.
 
-**The task shows Running but nothing answers** — look at the task's last
-result, and run `start-portal.ps1` by hand in a console to see the error.
-Usually `MATRIXREPORTS_CONFIG` is not set at machine level, or the service
+**The task shows Running but nothing answers** — run `start-portal.ps1` by hand
+in a console and read the error. Usually `MATRIXREPORTS_CONFIG` was set after
+the task was registered (re-register from a fresh PowerShell), or the service
 account cannot read the config file.
 
 **Everything is slow, or a step failed once then worked** — anti-virus. Get the
-exclusion from step 1c.
+exclusion for `C:\matrixreports`.
 
-**`refusing to bind 0.0.0.0 without authentication`** — step 7a was skipped.
+**`refusing to bind 0.0.0.0 without authentication`** — step 7 was skipped.
 Working as intended.
 
-**Portal shows every employee absent** — wrong punch table, or the date has no
-data. Run `check` for a month you know is busy.
+**The report shows only five groups** — that is the *minimum* layout, not a
+limit. The day you opened simply had nobody taking more than five breaks. Use
+the "Show the busiest day this month" link.
 
 ---
 
 ## What has been tested, and what has not
 
-**Verified.** The application runs under **waitress**, with an automated test
-so it cannot regress — the Windows switch from gunicorn is in the package, not
-only in this document.
+**Verified.** The compiled build was produced and driven end to end, not merely
+configured: the portal served a daily report with ten OUT/IN groups and the
+over-limit rows marked, streamed a real `.xlsx`, and the command-line half of
+the same executable ran `check` and printed the histogram. The delivery folder
+was then copied to an unrelated path and run from there — which is what exposes
+a build that assumed where it lived. An automated test keeps the application
+working under waitress.
 
-The **compiled build was produced and exercised**, not merely configured. A
-Nuitka standalone binary was built and then driven end to end: the portal
-served a daily report with ten OUT/IN groups and the over-limit rows marked,
-streamed a real `.xlsx`, and the command-line half of the same executable ran
-`check` and printed the histogram. Two packaging faults were found and fixed
-that way — duplicated data files, and a hard failure when an optional driver
-was absent.
+That build was for macOS, because that is the machine available. **The
+packaging configuration is proven; the Windows artifact is not.**
 
-That build was for macOS, because that is the machine available. The
-**packaging configuration** is therefore proven; the **Windows artifact** is
-not, and cannot be from here.
+**Not tested**: everything Windows-specific — the Scheduled Task, the ODBC MSI,
+IIS as a reverse proxy, Windows Authentication against SQL Server, and the
+Windows build itself. The commands come from Microsoft's documentation and
+ordinary practice.
 
-**Not tested**: everything Windows-specific — the Scheduled Task, the ODBC
-MSI, IIS as a reverse proxy, Windows Authentication against SQL Server, and
-the Windows build itself. The commands come from Microsoft's documentation and
-ordinary practice. Treat **step 7b** as the likeliest to need adjusting, and
-**build the executable well before travelling** rather than on the day:
-`pyodbc` compiling into a Windows build is the one thing nobody can confirm
-until it is tried.
+**Build the Windows executable and run `--check` on it well before the
+session.** Whether `pyodbc` compiles cleanly into a Windows build is the one
+thing nobody can confirm until it is tried, and finding out mid-session with
+their IT watching is the worst possible time.
 
 ---
 
 ## Appendix A — what gets installed
 
-Give this to their IT. On a managed server this is the conversation that
-gates everything else, so send it ahead of the visit.
+Send this to their IT ahead of the session. On a managed server this is the
+conversation that gates everything else.
 
 | Software | Source | Why |
 | --- | --- | --- |
 | ODBC Driver 18 for SQL Server | Microsoft, signed MSI | The only supported way to reach SQL Server |
 | Our application — one folder, no installer | We supply it | The reports |
-| *(optional)* IIS role + ARR + URL Rewrite | Microsoft | Only if the portal needs TLS |
-| *(optional)* AnyDesk | anydesk.com | Only if they do not want us using RDP |
+| *(only if TLS is needed)* IIS role + ARR + URL Rewrite | Microsoft | Reverse proxy and certificate |
 
 **That is the entire list.** The application is a compiled build: the Python
 interpreter and every library are inside the executable, so **no Python is
-installed on the server**, nothing goes into the registry or Program Files,
-and no package downloads happen on their network.
+installed**, nothing goes into the registry or Program Files, and no package
+downloads happen on their network.
 
-The libraries compiled in, all mainstream:
+Libraries compiled in, all mainstream:
 
 ```
 Flask          web framework
@@ -509,37 +440,33 @@ PyYAML         reads the config
 
 No scraping libraries, no telemetry, no analytics, no outbound calls.
 
-**Uninstalling** is deleting `C:\matrixreports` and removing the scheduled
-task. The ODBC driver can stay or go depending on whether anything else uses
-it.
-
 ### The questions their security team will ask
 
 | Question | Answer |
 | --- | --- |
 | **Ports opened** | One: 8000, or 443 via IIS. Nothing else |
-| **Outbound connections** | The Matrix SQL Server on 1433. Nothing else. No internet needed at runtime, only during install |
-| **Does it write to our database?** | **No.** `db_datareader` with explicit `DENY` on every write, enforced by SQL Server, not by our good behaviour |
+| **Outbound connections** | The Matrix SQL Server on 1433. Nothing else. No internet needed at runtime |
+| **Does it write to our database?** | **No.** `db_datareader` with explicit `DENY` on every write, enforced by SQL Server rather than by our good behaviour |
 | **Does it store our employee data?** | **No.** No database of our own, no cache, no sessions. Every request reads and closes. The only file we leave is a config |
-| **What identity does it run as?** | A domain service account with read-only SQL access — or `SYSTEM` if they prefer a SQL login |
-| **Where are credentials kept?** | With Windows Authentication, **nowhere** — that is the main reason to prefer it. Otherwise the SQL password sits in an ACL'd config file. The portal password is only ever a scrypt hash in a machine environment variable |
-| **Uninstall** | Remove the scheduled task and delete `C:\matrixreports`. Nothing else to unwind — no registry keys, no installed runtime |
+| **What identity does it run as?** | A domain service account with read-only SQL access, or `SYSTEM` if a SQL login is used |
+| **Where are credentials kept?** | With Windows Authentication, **nowhere** — that is the main reason to prefer it. Otherwise the SQL password sits in an ACL'd config file. The portal password is only ever a scrypt hash |
+| **Uninstall** | Remove the scheduled task and delete `C:\matrixreports`. No registry keys, no installed runtime |
 
-### One decision to make deliberately
+### One decision for them to make deliberately
 
 If IIS is used, its logs record request URLs, which include the report type,
 the date, and any employee codes filtered on. That is simultaneously the only
-audit trail of who looked at whose attendance and a plaintext file containing
+audit trail of who looked at whose attendance, and a plaintext file containing
 employee codes. Some organisations require the first; some object to the
-second. Ask which they want rather than leaving it as a default nobody
-examined.
+second. Ask which they want rather than leaving it as a default nobody looked
+at.
 
 ---
 
-## Appendix B — building the executable
+## Appendix B — building the application folder
 
-For us, not for the customer. **Do this before travelling**, on a Windows
-machine — Nuitka does not cross-compile, so a Windows `.exe` needs Windows.
+For us, before the session. **Nuitka does not cross-compile — a Windows `.exe`
+needs a Windows machine.** Not their server: we do not install Python there.
 
 ```powershell
 git clone <repo-url> matrixreports
@@ -549,26 +476,20 @@ python -m venv .venv
 .\.venv\Scripts\python scripts\build_exe.py --check
 ```
 
-The result is **`dist\matrixreports-windows\`** — that is the folder that
-goes to the server in step 5, with the config template and a short
-`READ-ME-FIRST.txt` already inside it. Nothing else needs collecting.
-
-(Nuitka's own output lands in `dist\launcher.dist\`. Do not ship that one —
-it has no config template in it.)
+The result is **`dist\matrixreports-windows\`** — that is what gets zipped and
+transferred in step 4. The config template and a short `READ-ME-FIRST.txt` are
+already inside it.
 
 Two things to watch:
 
-- **Build with `[sqlserver]` installed.** The build script skips driver
-  packages that are not present and prints a warning. A build made without
-  `pyodbc` compiles fine and then cannot reach SQL Server at all — read the
-  warnings rather than scrolling past them.
-- **`--check` runs a smoke test** on the result: that the binary starts, that
-  both the command line and the portal respond, and that the report templates
-  were carried into the build. Templates are the usual thing to be missing,
-  because Flask loads them from disk at runtime and nothing imports them.
+- **Build with `[sqlserver]` installed.** The script skips driver packages that
+  are not present and prints a warning. A build without `pyodbc` compiles
+  perfectly and then cannot reach SQL Server at all — read the warnings rather
+  than scrolling past them.
+- **Nuitka also leaves `dist\launcher.dist\`.** Do not ship that one; it has no
+  config template in it.
 
-The build is why the customer's IT cannot read the source: the output is
-machine code, not `.py` files. A Docker image would not have achieved that —
-an image is a tar archive with the sources sitting inside it.
-
----
+`--check` smoke-tests the result: that it starts, that both the command line
+and the portal respond, and that the report templates were carried in.
+Templates are the usual omission, because Flask loads them from disk at runtime
+and nothing imports them.
