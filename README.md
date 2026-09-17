@@ -46,8 +46,13 @@ pip install -e .                      # add [sqlserver], [mysql] or [postgres]
 ```
 
 Run it on a machine that can reach the Matrix SQL Server.
-[`docs/running-on-premise.md`](docs/running-on-premise.md) covers the Windows
-setup end to end: ODBC driver, a read-only login, scheduling and troubleshooting.
+
+* [`docs/runbook-windows-server.md`](docs/runbook-windows-server.md) — the
+  portal on Windows Server, step by step. On Windows the WSGI server is
+  **waitress**: gunicorn forks, and there is no `fork()` on Windows.
+* [`docs/runbook-ubuntu-vm.md`](docs/runbook-ubuntu-vm.md) — the same on Ubuntu.
+* [`docs/running-on-premise.md`](docs/running-on-premise.md) — command-line
+  reports only, no portal.
 
 ## Configure
 

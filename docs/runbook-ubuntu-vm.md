@@ -7,7 +7,11 @@ step will fail more confusingly.
 Budget about **three hours**: 45 minutes installing Ubuntu, 90 minutes of
 setup, and the reboots in steps 1 and 2 that you must not skip.
 
-`docs/running-on-premise.md` covers the CLI-only Windows case. This one covers
+**If the server is Windows, use
+[`runbook-windows-server.md`](runbook-windows-server.md) instead** — the WSGI
+server differs, and gunicorn cannot run there at all.
+
+`docs/running-on-premise.md` covers the CLI-only case. This one covers
 an **Ubuntu Desktop** VM running the web portal against the live Matrix
 database, on **Ubuntu Desktop 24.04.4 LTS** — Desktop rather than Server
 because AnyDesk needs a graphical session, and 24.04.4 because that is the
