@@ -437,16 +437,29 @@ data. Run `check` for a month you know is busy.
 
 ## What has been tested, and what has not
 
-**Verified**: the application runs correctly under **waitress**, serving
-reports and streaming `.xlsx` downloads, with an automated test covering it so
-it cannot regress. The Windows-only switch from gunicorn to waitress is in the
-package, not just in this document.
+**Verified.** The application runs under **waitress**, with an automated test
+so it cannot regress — the Windows switch from gunicorn is in the package, not
+only in this document.
 
-**Not tested**: everything Windows-specific — the Scheduled Task, the ODBC MSI,
-IIS as a reverse proxy, and Windows Authentication against SQL Server. No
-Windows machine was available. The commands are from Microsoft's documentation
-and ordinary practice, but treat step 7b as the part most likely to need
-adjusting on the day, and leave time for it.
+The **compiled build was produced and exercised**, not merely configured. A
+Nuitka standalone binary was built and then driven end to end: the portal
+served a daily report with ten OUT/IN groups and the over-limit rows marked,
+streamed a real `.xlsx`, and the command-line half of the same executable ran
+`check` and printed the histogram. Two packaging faults were found and fixed
+that way — duplicated data files, and a hard failure when an optional driver
+was absent.
+
+That build was for macOS, because that is the machine available. The
+**packaging configuration** is therefore proven; the **Windows artifact** is
+not, and cannot be from here.
+
+**Not tested**: everything Windows-specific — the Scheduled Task, the ODBC
+MSI, IIS as a reverse proxy, Windows Authentication against SQL Server, and
+the Windows build itself. The commands come from Microsoft's documentation and
+ordinary practice. Treat **step 7b** as the likeliest to need adjusting, and
+**build the executable well before travelling** rather than on the day:
+`pyodbc` compiling into a Windows build is the one thing nobody can confirm
+until it is tried.
 
 ---
 
